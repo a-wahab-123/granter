@@ -1,5 +1,5 @@
 {
-    "name": "whocan",
+    "name": "whocando",
     "version": "1.0.0",
     "description": "Who can do what in your app? Composable, type-safe authorization for TypeScript.",
     "keywords": [
@@ -19,11 +19,11 @@
     "license": "MIT",
     "repository": {
       "type": "git",
-      "url": "https://github.com/seeden/whocan.git"
+      "url": "https://github.com/seeden/whocando.git"
     },
-    "homepage": "https://github.com/seeden/whocan#readme",
+    "homepage": "https://github.com/seeden/whocando#readme",
     "bugs": {
-      "url": "https://github.com/seeden/whocan/issues"
+      "url": "https://github.com/seeden/whocando/issues"
     },
     "main": "./dist/index.js",
     "module": "./dist/index.mjs",

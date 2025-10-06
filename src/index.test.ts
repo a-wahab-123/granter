@@ -18,7 +18,7 @@ type TestContext = {
   user: { id: string; role: string };
 };
 
-describe('whocan', () => {
+describe('whocando', () => {
   const isAdmin = permission<TestContext>(
     'isAdmin', 
     (ctx) => ctx.user.role === 'admin'

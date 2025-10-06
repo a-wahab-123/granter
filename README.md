@@ -1,13 +1,13 @@
-# whocan
+# whocando
 
 > Who can do what in your app?
 
 Composable, type-safe, **async-first** authorization for TypeScript.
 
-[![npm version](https://img.shields.io/npm/v/whocan.svg)](https://www.npmjs.com/package/whocan)
+[![npm version](https://img.shields.io/npm/v/whocando.svg)](https://www.npmjs.com/package/whocando)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Why whocan?
+## Why whocando?
 
 ✨ **Composable** - Build complex permissions from simple rules  
 🔒 **Type-safe** - Full TypeScript inference with generic contexts  
@@ -19,63 +19,71 @@ Composable, type-safe, **async-first** authorization for TypeScript.
 ## Quick Start
 
 ```typescript
-import { permission, or, and, can, authorize, withContext, withAbility } from 'whocan';
-import DataLoader from 'dataloader';
+import { permission, or, and, can, authorize, filter } from 'whocando';
 
-// 1. Define your context type
+// 1. Define your types
 type AppContext = {
   user: { id: string; role: string };
-  loaders: {
-    post: DataLoader<string, Post>;
-  };
+  db: Database;
+};
+
+type Post = {
+  id: string;
+  authorId: string;
+  title: string;
 };
 
 // 2. Create permissions (sync or async!)
-const isAdmin = permission<AppContext>(
-  'isAdmin',
-  (ctx) => ctx.user.role === 'admin'  // Sync check
+// Without resource - simple checks
+const isAuthenticated = permission(
+  'isAuthenticated',
+  (ctx: AppContext) => !!ctx.user
 );
 
-const isPostOwner = permission<AppContext, { id: string }>(
+const isAdmin = permission(
+  'isAdmin',
+  (ctx: AppContext) => ctx.user.role === 'admin'
+);
+
+// With resource - entity-specific checks
+const isPostOwner = permission(
   'isPostOwner',
-  async (ctx, post) => {  // Async check with DataLoader!
+  async (ctx: AppContext, post: Post) => {
     if (!post) return false;
-    const fullPost = await ctx.loaders.post.load(post.id);
-    return fullPost.authorId === ctx.user.id;
+    return post.authorId === ctx.user.id;
   }
 );
 
 // 3. Compose permissions
 const canEditPost = or(isPostOwner, isAdmin);
-const canDeletePost = and(isAuthenticated, or(isPostOwner, isAdmin));
 
-// 4. Check permissions
-const ctx = { user: { id: '1', role: 'user' }, loaders };
+// 4. Use permissions
+const ctx: AppContext = { user: { id: '1', role: 'user' }, db };
 
-// Simple check
+// Without resource
+if (await can(ctx, isAuthenticated)) {
+  console.log('User is logged in');
+}
+
+// With resource
+const post = await db.getPost('123');
 if (await can(ctx, canEditPost, post)) {
-  await updatePost(post);
+  await db.updatePost(post);
 }
 
 // Require permission (throws if denied)
-await authorize(ctx, canDeletePost, post);
-await deletePost(post);
+await authorize(ctx, isAuthenticated);
+await authorize(ctx, canEditPost, post);
 
-// Filter to allowed items
-const allPosts = await getPosts();
+// Filter array of resources
+const allPosts = await db.getPosts();
 const editablePosts = await filter(ctx, canEditPost, allPosts);
-
-// Or use bound context for cleaner code
-const { can, authorize, filter } = withContext(ctx);
-if (await can(canEditPost, post)) { /* ... */ }
-await authorize(canDeletePost, post);
-const editable = await filter(canEditPost, allPosts);
 ```
 
 ## Installation
 
 ```bash
-npm install whocan
+npm install whocando
 ```
 
 ## Core Concepts
@@ -86,24 +94,24 @@ A permission is a named function that checks if an action is allowed. It can be 
 
 ```typescript
 // Sync permission - simple checks
-const isAdmin = permission<AppContext>(
+const isAdmin = permission(
   'isAdmin',
-  (ctx) => ctx.user.role === 'admin'
+  (ctx: AppContext) => ctx.user.role === 'admin'
 );
 
 // Async permission - database queries, API calls
-const isPostOwner = permission<AppContext, { id: string }>(
+const isPostOwner = permission(
   'isPostOwner',
-  async (ctx, post) => {
-    const fullPost = await ctx.loaders.post.load(post.id);
+  async (ctx: AppContext, post: Post) => {
+    const fullPost = await ctx.db.post.findUnique({ where: { id: post.id } });
     return fullPost.authorId === ctx.user.id;
   }
 );
 
 // Factory function for reusable patterns
-const hasRole = (role: string) => permission<AppContext>(
+const hasRole = (role: string) => permission(
   `hasRole:${role}`,
-  (ctx) => ctx.user.roles.includes(role)
+  (ctx: AppContext) => ctx.user.roles.includes(role)
 );
 
 const isModerator = hasRole('moderator');
@@ -208,7 +216,7 @@ app.use('*', async (c, next) => {
 
 ```typescript
 import express from 'express';
-import { withAbility, permission, or, UnauthorizedError, ForbiddenError } from 'whocan';
+import { withAbility, permission, or, UnauthorizedError, ForbiddenError } from 'whocando';
 
 const app = express();
 
@@ -265,7 +273,7 @@ app.get('/posts/editable', async (req, res) => {
 
 ```typescript
 import { Hono } from 'hono';
-import { withAbility, withContext, UnauthorizedError, ForbiddenError } from 'whocan';
+import { withAbility, withContext, UnauthorizedError, ForbiddenError } from 'whocando';
 
 const app = new Hono();
 
@@ -334,7 +342,7 @@ app.put('/posts/:id', async (c) => {
 
 ```typescript
 import DataLoader from 'dataloader';
-import { permission, or, can, withContext } from 'whocan';
+import { permission, or, can, withContext } from 'whocando';
 
 type AppContext = {
   user: User;
@@ -399,7 +407,7 @@ const resolvers = {
 ```typescript
 'use server';
 
-import { authorize } from 'whocan';
+import { authorize } from 'whocando';
 import { getContext } from '@/lib/auth';
 
 export async function deletePost(postId: string) {
@@ -414,11 +422,18 @@ export async function deletePost(postId: string) {
 
 ## API Reference
 
-### `permission<TCtx, TResource>(name, check)`
+### `permission(name, check)`
 
-Create a permission. The check function can be sync or async.
+Create a permission. The check function can be sync or async. Use explicit types in the function signature for clarity.
 
 ```typescript
+// Recommended: explicit types
+const isAdmin = permission(
+  'isAdmin',
+  (ctx: AppContext) => ctx.user.role === 'admin'
+);
+
+// Also works: with generics
 const isAdmin = permission<AppContext>(
   'isAdmin',
   (ctx) => ctx.user.role === 'admin'
@@ -533,7 +548,7 @@ app.use('*', async (c, next) => {
 ### Built-in Errors
 
 ```typescript
-import { UnauthorizedError, ForbiddenError } from 'whocan';
+import { UnauthorizedError, ForbiddenError } from 'whocando';
 
 try {
   await authorize(ctx, canDelete, post);
@@ -636,7 +651,7 @@ const hasVerifiedEmail = permission('hasVerifiedEmail', ...);
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { can, authorize, ForbiddenError } from 'whocan';
+import { can, authorize, ForbiddenError } from 'whocando';
 
 describe('permissions', () => {
   it('should allow admin to edit any post', async () => {
@@ -658,7 +673,7 @@ describe('permissions', () => {
 
 ## Philosophy
 
-`whocan` follows the Drizzle ORM philosophy:
+`whocando` follows the Drizzle ORM philosophy:
 
 - **Composable** - Build complex from simple
 - **Type-safe** - TypeScript-first
