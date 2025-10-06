@@ -1,6 +1,6 @@
 {
     "name": "whocando",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Who can do what in your app? Composable, type-safe authorization for TypeScript.",
     "keywords": [
       "authorization",
