@@ -673,14 +673,10 @@ describe('permissions', () => {
 
 ## Philosophy
 
-`whocando` follows the Drizzle ORM philosophy:
-
 - **Composable** - Build complex from simple
 - **Type-safe** - TypeScript-first
 - **Explicit** - No magic
 - **Lightweight** - Minimal abstraction
-
-Just like you compose Drizzle queries with `and()`, `or()`, `eq()`, you compose permissions the same way.
 
 ## License
 
