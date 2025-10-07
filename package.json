@@ -1,6 +1,6 @@
 {
     "name": "granter",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Composable, type-safe authorization for TypeScript. Define permissions once, use everywhere.",
     "keywords": [
       "authorization",
