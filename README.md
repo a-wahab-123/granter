@@ -1,13 +1,11 @@
-# whocando
+# granter
 
-> Who can do what in your app?
+> Composable, type-safe authorization for TypeScript
 
-Composable, type-safe, **async-first** authorization for TypeScript.
-
-[![npm version](https://img.shields.io/npm/v/whocando.svg)](https://www.npmjs.com/package/whocando)
+[![npm version](https://img.shields.io/npm/v/granter.svg)](https://www.npmjs.com/package/granter)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Why whocando?
+## Why granter?
 
 ✨ **Composable** - Build complex permissions from simple rules  
 🔒 **Type-safe** - Full TypeScript inference with generic contexts  
@@ -19,7 +17,7 @@ Composable, type-safe, **async-first** authorization for TypeScript.
 ## Quick Start
 
 ```typescript
-import { permission, or, and, can, authorize, filter } from 'whocando';
+import { permission, or, and, can, authorize, filter } from 'granter';
 
 // 1. Define your types
 type AppContext = {
@@ -83,7 +81,7 @@ const editablePosts = await filter(ctx, canEditPost, allPosts);
 ## Installation
 
 ```bash
-npm install whocando
+npm install granter
 ```
 
 ## Core Concepts
@@ -216,7 +214,7 @@ app.use('*', async (c, next) => {
 
 ```typescript
 import express from 'express';
-import { withAbility, permission, or, UnauthorizedError, ForbiddenError } from 'whocando';
+import { withAbility, permission, or, UnauthorizedError, ForbiddenError } from 'granter';
 
 const app = express();
 
@@ -273,7 +271,7 @@ app.get('/posts/editable', async (req, res) => {
 
 ```typescript
 import { Hono } from 'hono';
-import { withAbility, withContext, UnauthorizedError, ForbiddenError } from 'whocando';
+import { withAbility, withContext, UnauthorizedError, ForbiddenError } from 'granter';
 
 const app = new Hono();
 
@@ -342,7 +340,7 @@ app.put('/posts/:id', async (c) => {
 
 ```typescript
 import DataLoader from 'dataloader';
-import { permission, or, can, withContext } from 'whocando';
+import { permission, or, can, withContext } from 'granter';
 
 type AppContext = {
   user: User;
@@ -407,7 +405,7 @@ const resolvers = {
 ```typescript
 'use server';
 
-import { authorize } from 'whocando';
+import { authorize } from 'granter';
 import { getContext } from '@/lib/auth';
 
 export async function deletePost(postId: string) {
@@ -548,7 +546,7 @@ app.use('*', async (c, next) => {
 ### Built-in Errors
 
 ```typescript
-import { UnauthorizedError, ForbiddenError } from 'whocando';
+import { UnauthorizedError, ForbiddenError } from 'granter';
 
 try {
   await authorize(ctx, canDelete, post);
@@ -651,7 +649,7 @@ const hasVerifiedEmail = permission('hasVerifiedEmail', ...);
 
 ```typescript
 import { describe, it, expect } from 'vitest';
-import { can, authorize, ForbiddenError } from 'whocando';
+import { can, authorize, ForbiddenError } from 'granter';
 
 describe('permissions', () => {
   it('should allow admin to edit any post', async () => {

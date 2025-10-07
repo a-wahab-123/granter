@@ -1,7 +1,7 @@
 {
-    "name": "whocando",
+    "name": "granter",
     "version": "1.0.1",
-    "description": "Who can do what in your app? Composable, type-safe authorization for TypeScript.",
+    "description": "Composable, type-safe authorization for TypeScript. Define permissions once, use everywhere.",
     "keywords": [
       "authorization",
       "permissions",
@@ -19,11 +19,11 @@
     "license": "MIT",
     "repository": {
       "type": "git",
-      "url": "https://github.com/seeden/whocando.git"
+      "url": "https://github.com/seeden/granter.git"
     },
-    "homepage": "https://github.com/seeden/whocando#readme",
+    "homepage": "https://github.com/seeden/granter#readme",
     "bugs": {
-      "url": "https://github.com/seeden/whocando/issues"
+      "url": "https://github.com/seeden/granter/issues"
     },
     "main": "./dist/index.js",
     "module": "./dist/index.mjs",
