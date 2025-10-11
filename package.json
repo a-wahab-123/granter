@@ -1,66 +1,71 @@
 {
-    "name": "granter",
-    "version": "1.0.2",
-    "description": "Composable, type-safe authorization for TypeScript. Define permissions once, use everywhere.",
-    "keywords": [
-      "authorization",
-      "permissions",
-      "access-control",
-      "authz",
-      "rbac",
-      "abac",
-      "security",
-      "composable",
-      "typescript",
-      "async",
-      "type-safe"
-    ],
-    "author": "Zlatko Fedor <zfedor@gmail.com>",
-    "license": "MIT",
-    "repository": {
-      "type": "git",
-      "url": "https://github.com/seeden/granter.git"
-    },
-    "homepage": "https://github.com/seeden/granter#readme",
-    "bugs": {
-      "url": "https://github.com/seeden/granter/issues"
-    },
-    "main": "./dist/index.js",
-    "module": "./dist/index.mjs",
-    "types": "./dist/index.d.ts",
-    "exports": {
-      ".": {
-        "import": {
-          "types": "./dist/index.d.mts",
-          "default": "./dist/index.mjs"
-        },
-        "require": {
-          "types": "./dist/index.d.ts",
-          "default": "./dist/index.js"
-        }
+  "name": "granter",
+  "version": "1.0.2",
+  "description": "Composable, type-safe authorization for TypeScript. Define permissions once, use everywhere.",
+  "keywords": [
+    "authorization",
+    "permissions",
+    "access-control",
+    "authz",
+    "rbac",
+    "abac",
+    "security",
+    "composable",
+    "typescript",
+    "async",
+    "type-safe"
+  ],
+  "author": "Zlatko Fedor <zfedor@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/seeden/granter.git"
+  },
+  "homepage": "https://github.com/seeden/granter#readme",
+  "bugs": {
+    "url": "https://github.com/seeden/granter/issues"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
       }
-    },
-    "files": [
-      "dist",
-      "README.md",
-      "LICENSE"
-    ],
-    "scripts": {
-      "build": "tsup src/index.ts --format cjs,esm --dts --clean",
-      "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
-      "test": "vitest",
-      "test:coverage": "vitest --coverage",
-      "typecheck": "tsc --noEmit",
-      "lint": "eslint src",
-      "prepublishOnly": "npm run build"
-    },
-    "devDependencies": {
-      "@types/node": "^24.7.0",
-      "tsup": "^8.5.0",
-      "typescript": "^5.9.3",
-      "vitest": "^3.2.4"
-    },
-    "engines": {
-      "node": ">=16.0.0"
     }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "test:types": "tsd",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "format": "prettier --write \"src/**/*.ts\" \"test-d/**/*.ts\" \"*.json\" \"*.md\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test-d/**/*.ts\" \"*.json\" \"*.md\"",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "prettier": "^3.6.2",
+    "tsd": "^0.33.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
+}

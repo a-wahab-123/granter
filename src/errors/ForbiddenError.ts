@@ -1,9 +1,9 @@
-import { PermissionError } from "./PermissionError";
+import { PermissionError } from './PermissionError';
 
 /**
  * Error thrown when user is authenticated but lacks permission
  * HTTP Status: 403 Forbidden
- * 
+ *
  * @example
  * ```typescript
  * if (!await can(canDelete, ctx, post)) {

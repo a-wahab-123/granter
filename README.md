@@ -12,7 +12,37 @@
 ⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader  
 🎯 **Simple API** - Just `can()`, `authorize()`, and `filter()`  
 🔧 **Framework-agnostic** - Works everywhere  
-🪶 **Zero dependencies**  
+🪶 **Zero dependencies**
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Core Concepts](#core-concepts)
+  - [Authentication vs Authorization](#authentication-vs-authorization)
+  - [Permissions](#permissions)
+  - [Operators](#operators)
+  - [Checking Permissions](#checking-permissions)
+  - [Context Binding](#context-binding)
+  - [Enhanced Context with Abilities](#enhanced-context-with-abilities)
+- [Examples](#examples)
+  - [Express.js REST API](#expressjs-rest-api)
+  - [Hono REST API](#hono-rest-api)
+  - [GraphQL with DataLoader](#graphql-with-dataloader)
+  - [Next.js Server Actions](#nextjs-server-actions)
+- [Authentication Integration](#authentication-integration)
+  - [Auth.js / NextAuth.js](#authjs--nextauthjs)
+  - [Clerk](#clerk)
+  - [Passport.js](#passportjs)
+  - [Supabase Auth](#supabase-auth)
+  - [Custom JWT / Sessions](#custom-jwt--sessions)
+  - [OAuth (Without Library)](#oauth-without-library)
+  - [Best Practices](#best-practices)
+- [API Reference](#api-reference)
+- [Error Handling](#error-handling)
+- [Best Practices](#best-practices-1)
+- [Testing](#testing)
+- [Philosophy](#philosophy)
 
 ## Quick Start
 
@@ -33,24 +63,15 @@ type Post = {
 
 // 2. Create permissions (sync or async!)
 // Without resource - simple checks
-const isAuthenticated = permission(
-  'isAuthenticated',
-  (ctx: AppContext) => !!ctx.user
-);
+const isAuthenticated = permission('isAuthenticated', (ctx: AppContext) => !!ctx.user);
 
-const isAdmin = permission(
-  'isAdmin',
-  (ctx: AppContext) => ctx.user.role === 'admin'
-);
+const isAdmin = permission('isAdmin', (ctx: AppContext) => ctx.user.role === 'admin');
 
 // With resource - entity-specific checks
-const isPostOwner = permission(
-  'isPostOwner',
-  async (ctx: AppContext, post: Post) => {
-    if (!post) return false;
-    return post.authorId === ctx.user.id;
-  }
-);
+const isPostOwner = permission('isPostOwner', async (ctx: AppContext, post: Post) => {
+  if (!post) return false;
+  return post.authorId === ctx.user.id;
+});
 
 // 3. Compose permissions
 const canEditPost = or(isPostOwner, isAdmin);
@@ -86,31 +107,52 @@ npm install granter
 
 ## Core Concepts
 
+### Authentication vs Authorization
+
+**granter** is an **authorization** library (authz), not an **authentication** library (authn). Understanding the difference is crucial:
+
+- **Authentication (authn)**: _Who are you?_ - Verifying identity (login, passwords, OAuth, JWT)
+- **Authorization (authz)**: _What can you do?_ - Checking permissions and access control
+
+```
+┌─────────────────┐    ┌──────────────┐    ┌─────────┐    ┌──────────┐
+│ Auth Library    │ -> │ Create       │ -> │ granter │ -> │ Your App │
+│ (Clerk, Auth.js)│    │ Context      │    │ (authz) │    │ Logic    │
+└─────────────────┘    └──────────────┘    └─────────┘    └──────────┘
+   Who are you?         Enrich context      What can       Execute
+                                            you do?         action
+```
+
+**granter assumes you already have an authenticated user.** It focuses solely on what that user can do:
+
+```typescript
+// ✅ You handle authentication (any way you want)
+const session = await getSession(); // Clerk, Auth.js, Passport, custom, etc.
+
+// ✅ granter handles authorization
+const ctx = { user: session.user, db };
+await authorize(ctx, canDeletePost, post);
+```
+
+This separation means granter works with **any** authentication system - no lock-in, full flexibility.
+
 ### Permissions
 
 A permission is a named function that checks if an action is allowed. It can be **sync or async**:
 
 ```typescript
 // Sync permission - simple checks
-const isAdmin = permission(
-  'isAdmin',
-  (ctx: AppContext) => ctx.user.role === 'admin'
-);
+const isAdmin = permission('isAdmin', (ctx: AppContext) => ctx.user.role === 'admin');
 
 // Async permission - database queries, API calls
-const isPostOwner = permission(
-  'isPostOwner',
-  async (ctx: AppContext, post: Post) => {
-    const fullPost = await ctx.db.post.findUnique({ where: { id: post.id } });
-    return fullPost.authorId === ctx.user.id;
-  }
-);
+const isPostOwner = permission('isPostOwner', async (ctx: AppContext, post: Post) => {
+  const fullPost = await ctx.db.post.findUnique({ where: { id: post.id } });
+  return fullPost.authorId === ctx.user.id;
+});
 
 // Factory function for reusable patterns
-const hasRole = (role: string) => permission(
-  `hasRole:${role}`,
-  (ctx: AppContext) => ctx.user.roles.includes(role)
-);
+const hasRole = (role: string) =>
+  permission(`hasRole:${role}`, (ctx: AppContext) => ctx.user.roles.includes(role));
 
 const isModerator = hasRole('moderator');
 ```
@@ -129,11 +171,35 @@ const canPublish = and(isAuthenticated, isOwner, hasVerifiedEmail);
 // NOT - negate permission
 const canComment = and(isAuthenticated, not(isBanned));
 
-// Complex compositions
-const canModerate = and(
-  isAuthenticated,
-  or(isAdmin, and(isModerator, hasVerifiedEmail))
+// Complex compositions - operators can be nested arbitrarily
+const canModerate = and(isAuthenticated, or(isAdmin, and(isModerator, hasVerifiedEmail)));
+
+// not() can wrap any composed permission
+const isNeitherOwnerNorAdmin = not(or(isOwner, isAdmin));
+const cannotEditOrDelete = not(and(isAuthenticated, or(isOwner, isAdmin)));
+```
+
+**Type Safety:** Operators ensure all permissions work on compatible resource types:
+
+```typescript
+type Post = { id: string; authorId: string };
+type Comment = { id: string; authorId: string; postId: string };
+
+const isPostOwner = permission('isPostOwner', (ctx, post?: Post) => post?.authorId === ctx.user.id);
+
+const isCommentOwner = permission(
+  'isCommentOwner',
+  (ctx, comment?: Comment) => comment?.authorId === ctx.user.id
 );
+
+// ✅ Allowed: Same resource type
+const canEditPost = or(isPostOwner, isAdmin);
+
+// ✅ Allowed: Mix resource-less with resource-specific
+const canDeletePost = and(isAuthenticated, isPostOwner);
+
+// ❌ Prevented: Mixing incompatible resource types
+const mixed = or(isPostOwner, isCommentOwner); // TypeScript error!
 ```
 
 **Performance:** `or()` runs all checks in parallel for better performance with async permissions. This is especially powerful with DataLoader, as all database queries will be batched together! `and()` runs sequentially and stops at the first failure, which is optimal when you have expensive checks ordered after cheap ones.
@@ -163,13 +229,15 @@ Use `withContext()` to avoid passing context repeatedly:
 
 ```typescript
 // Without binding - repetitive
-if (await can(ctx, canRead, post)) { }
+if (await can(ctx, canRead, post)) {
+}
 await authorize(ctx, canEdit, post);
 const editable = await filter(ctx, canDelete, posts);
 
 // With binding - cleaner
 const { can, authorize, filter } = withContext(ctx);
-if (await can(canRead, post)) { }
+if (await can(canRead, post)) {
+}
 await authorize(canEdit, post);
 const editable = await filter(canDelete, posts);
 ```
@@ -186,8 +254,8 @@ const enhancedCtx = withAbility(ctx);
 // Destructure what you need - context properties AND permission methods
 const { user, db, authorize, filter } = enhancedCtx;
 
-console.log(user.id);  // Original context property
-await authorize(canEdit, post);  // Permission method
+console.log(user.id); // Original context property
+await authorize(canEdit, post); // Permission method
 const filtered = await filter(canRead, posts);
 
 // Perfect for middleware - enhance the context itself
@@ -225,32 +293,35 @@ const isPostOwner = permission('isPostOwner', async (ctx, post) => {
 });
 const canDeletePost = or(isPostOwner, isAdmin);
 
-// Middleware: Attach ability to request
+// Step 1: Authentication (happens first - use any auth library)
+app.use(authenticateUser); // Your auth middleware (Passport, JWT, etc.)
+
+// Step 2: Create granter context from authenticated user
 app.use((req, res, next) => {
-  const ctx = {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  req.ability = withAbility({
     user: req.user, // From auth middleware
-    db: req.db,
-  };
-  req.ability = withAbility(ctx);
+    db: prisma,
+  });
   next();
 });
 
-// Destructure permission methods from enhanced context
+// Step 3: Use authorization in routes
 app.delete('/posts/:id', async (req, res) => {
   try {
     const { authorize, db } = req.ability;
-    const post = await db.post.findUnique({ 
-      where: { id: req.params.id } 
+    const post = await db.post.findUnique({
+      where: { id: req.params.id },
     });
-    
+
     await authorize(canDeletePost, post);
     await db.post.delete({ where: { id: req.params.id } });
-    
+
     res.json({ success: true });
   } catch (error) {
-    if (error instanceof UnauthorizedError) {
-      return res.status(401).json({ error: error.message });
-    }
     if (error instanceof ForbiddenError) {
       return res.status(403).json({ error: error.message });
     }
@@ -275,14 +346,26 @@ import { withAbility, withContext, UnauthorizedError, ForbiddenError } from 'gra
 
 const app = new Hono();
 
-// Middleware: Enhance context with abilities
+// Step 1: Authentication (use any auth middleware)
+app.use('*', authenticateUser); // Sets c.set('user', authenticatedUser)
+
+// Step 2: Create granter context with abilities
 app.use('*', async (c, next) => {
-  const baseCtx = {
-    user: c.get('user'), // From auth middleware
-    loaders: c.get('loaders'),
-  };
+  const user = c.get('user');
+
+  if (!user) {
+    return c.json({ error: 'Not authenticated' }, 401);
+  }
+
   // withAbility returns { ...baseCtx, can, authorize, filter }
-  c.set('ctx', withAbility(baseCtx));
+  c.set(
+    'ctx',
+    withAbility({
+      user,
+      db: prisma,
+      loaders: c.get('loaders'), // Optional: DataLoader for batching
+    })
+  );
   await next();
 });
 
@@ -291,10 +374,10 @@ app.delete('/posts/:id', async (c) => {
   try {
     const { authorize } = c.get('ctx');
     const post = await getPost(c.req.param('id'));
-    
+
     await authorize(canDelete, post);
     await deletePost(post);
-    
+
     return c.json({ success: true });
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -310,10 +393,10 @@ app.delete('/posts/:id', async (c) => {
 // Destructure both context properties and permission methods
 app.get('/posts/my', async (c) => {
   const { user, filter } = c.get('ctx');
-  
+
   const allPosts = await getPosts();
   const myPosts = await filter(canEdit, allPosts);
-  
+
   return c.json({ userId: user.id, posts: myPosts });
 });
 
@@ -322,10 +405,10 @@ app.put('/posts/:id', async (c) => {
   try {
     const baseCtx = { user: c.get('user'), loaders: c.get('loaders') };
     const { authorize } = withContext(baseCtx);
-    
+
     const post = await getPost(c.req.param('id'));
     await authorize(canEdit, post);
-    
+
     return c.json(await updatePost(post));
   } catch (error) {
     if (error instanceof ForbiddenError) {
@@ -339,6 +422,7 @@ app.put('/posts/:id', async (c) => {
 ### GraphQL with DataLoader
 
 ```typescript
+import { ApolloServer } from '@apollo/server';
 import DataLoader from 'dataloader';
 import { permission, or, can, withContext } from 'granter';
 
@@ -349,17 +433,42 @@ type AppContext = {
   };
 };
 
-// Async permission using DataLoader
-const isPostOwner = permission<AppContext, { id: string }>(
-  'isPostOwner',
-  async (ctx, post) => {
-    if (!post) return false;
-    const fullPost = await ctx.loaders.post.load(post.id);
-    return fullPost.authorId === ctx.user.id;
-  }
-);
+// Define permissions
+const isPostOwner = permission<AppContext, { id: string }>('isPostOwner', async (ctx, post) => {
+  if (!post) return false;
+  const fullPost = await ctx.loaders.post.load(post.id);
+  return fullPost.authorId === ctx.user.id;
+});
 
 const canEditPost = or(isPostOwner, isAdmin);
+
+// Apollo Server setup
+const server = new ApolloServer({
+  typeDefs,
+  resolvers,
+  context: async ({ req }) => {
+    // Step 1: Authentication (extract and verify token)
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    const user = await verifyToken(token); // Your auth logic
+
+    if (!user) {
+      throw new Error('Not authenticated');
+    }
+
+    // Step 2: Create context with DataLoader (for granter)
+    return {
+      user,
+      loaders: {
+        post: new DataLoader(async (ids) => {
+          const posts = await db.post.findMany({
+            where: { id: { in: ids } },
+          });
+          return ids.map((id) => posts.find((p) => p.id === id));
+        }),
+      },
+    };
+  },
+});
 
 // GraphQL resolvers
 const resolvers = {
@@ -367,22 +476,22 @@ const resolvers = {
     posts: async (_, __, ctx: AppContext) => {
       const { filter } = withContext(ctx);
       const allPosts = await getAllPosts();
-      
+
       // Filter to readable posts - DataLoader batches all checks!
       return filter(canReadPost, allPosts);
     },
   },
-  
+
   Mutation: {
     updatePost: async (_, { id, input }, ctx: AppContext) => {
       const { authorize } = withContext(ctx);
       const post = await ctx.loaders.post.load(id);
-      
+
       await authorize(canEditPost, post);
       return updatePost(id, input);
     },
   },
-  
+
   Post: {
     // Field-level permissions
     // When resolving 100 posts, DataLoader batches into 1 query!
@@ -405,17 +514,663 @@ const resolvers = {
 ```typescript
 'use server';
 
+import { auth } from '@/lib/auth'; // Auth.js, Clerk, or your auth solution
 import { authorize } from 'granter';
-import { getContext } from '@/lib/auth';
+import { canDeletePost } from '@/lib/permissions';
+import { db } from '@/lib/db';
 
 export async function deletePost(postId: string) {
-  const ctx = await getContext();
+  // Step 1: Authentication - verify user is logged in
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error('Not authenticated');
+  }
+
+  // Step 2: Create context for authorization
+  const ctx = {
+    user: session.user,
+    db,
+  };
+
+  // Step 3: Authorization - check permissions
   const post = await db.post.findUnique({ where: { id: postId } });
-  
   await authorize(ctx, canDeletePost, post);
-  
+
+  // Step 4: Execute action
   await db.post.delete({ where: { id: postId } });
 }
+```
+
+## Authentication Integration
+
+granter is **authorization-only** and works with any authentication system. This section shows how to integrate with popular auth libraries.
+
+### Auth.js / NextAuth.js
+
+[Auth.js](https://authjs.dev/) (formerly NextAuth.js) is the most popular auth library for Next.js.
+
+**Next.js App Router with Server Actions:**
+
+```typescript
+// app/actions/posts.ts
+'use server';
+
+import { auth } from '@/lib/auth'; // Your Auth.js config
+import { withAbility } from 'granter';
+import { canDeletePost } from '@/lib/permissions';
+import { db } from '@/lib/db';
+
+export async function deletePost(postId: string) {
+  // 1. Authentication - get session
+  const session = await auth();
+  if (!session?.user) {
+    throw new Error('Not authenticated');
+  }
+
+  // 2. Create context for authorization
+  const ctx = withAbility({
+    user: session.user,
+    db,
+  });
+
+  // 3. Authorization - check permissions
+  const post = await db.post.findUnique({ where: { id: postId } });
+  await ctx.authorize(canDeletePost, post);
+
+  // 4. Execute action
+  await db.post.delete({ where: { id: postId } });
+}
+```
+
+**Middleware pattern:**
+
+```typescript
+// middleware.ts
+import { auth } from '@/lib/auth';
+import { NextResponse } from 'next/server';
+
+export default auth((req) => {
+  // Auth.js attaches session to req.auth
+  if (!req.auth) {
+    return NextResponse.redirect(new URL('/login', req.url));
+  }
+});
+
+// app/api/posts/[id]/route.ts
+import { auth } from '@/lib/auth';
+import { withAbility } from 'granter';
+
+export async function DELETE(req: Request, { params }: { params: { id: string } }) {
+  const session = await auth();
+
+  const ctx = withAbility({
+    user: session.user,
+    db,
+  });
+
+  const post = await db.post.findUnique({ where: { id: params.id } });
+  await ctx.authorize(canDeletePost, post);
+
+  await db.post.delete({ where: { id: params.id } });
+  return Response.json({ success: true });
+}
+```
+
+### Clerk
+
+[Clerk](https://clerk.com/) provides drop-in authentication with a great DX.
+
+**With Hono:**
+
+```typescript
+import { Hono } from 'hono';
+import { clerkMiddleware, getAuth } from '@hono/clerk-auth';
+import { withAbility } from 'granter';
+
+const app = new Hono();
+
+// 1. Clerk authentication middleware
+app.use('*', clerkMiddleware());
+
+// 2. Create granter context with Clerk user
+app.use('*', async (c, next) => {
+  const auth = getAuth(c);
+
+  if (!auth?.userId) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
+  // Fetch full user details (or use cached)
+  const user = await c.env.DB.prepare('SELECT * FROM users WHERE clerk_id = ?')
+    .bind(auth.userId)
+    .first();
+
+  // Enhance context with granter abilities
+  c.set(
+    'ctx',
+    withAbility({
+      user,
+      clerkUserId: auth.userId,
+      db: c.env.DB,
+    })
+  );
+
+  await next();
+});
+
+// 3. Use permissions in routes
+app.delete('/posts/:id', async (c) => {
+  const { authorize, user } = c.get('ctx');
+  const post = await getPost(c.req.param('id'));
+
+  await authorize(canDeletePost, post);
+  await deletePost(post.id);
+
+  return c.json({ success: true });
+});
+```
+
+**With Express:**
+
+```typescript
+import express from 'express';
+import { ClerkExpressRequireAuth } from '@clerk/clerk-sdk-node';
+import { withAbility } from 'granter';
+
+const app = express();
+
+// 1. Clerk authentication
+app.use(ClerkExpressRequireAuth());
+
+// 2. Create granter context
+app.use((req, res, next) => {
+  req.ability = withAbility({
+    user: req.auth.user,
+    clerkUserId: req.auth.userId,
+    db: prisma,
+  });
+  next();
+});
+
+// 3. Use in routes
+app.delete('/posts/:id', async (req, res) => {
+  const { authorize } = req.ability;
+  const post = await prisma.post.findUnique({
+    where: { id: req.params.id },
+  });
+
+  await authorize(canDeletePost, post);
+  await prisma.post.delete({ where: { id: req.params.id } });
+
+  res.json({ success: true });
+});
+```
+
+### Passport.js
+
+[Passport](https://www.passportjs.org/) is the classic Express authentication middleware.
+
+**With Local Strategy:**
+
+```typescript
+import express from 'express';
+import passport from 'passport';
+import { Strategy as LocalStrategy } from 'passport-local';
+import { withAbility, UnauthorizedError, ForbiddenError } from 'granter';
+
+// 1. Configure Passport
+passport.use(
+  new LocalStrategy(async (username, password, done) => {
+    const user = await db.user.findUnique({ where: { username } });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return done(null, false);
+    }
+    return done(null, user);
+  })
+);
+
+const app = express();
+
+// 2. Authentication middleware
+const requireAuth = (req, res, next) => {
+  if (!req.isAuthenticated()) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  next();
+};
+
+// 3. Create granter context from Passport user
+app.use(requireAuth);
+app.use((req, res, next) => {
+  req.ability = withAbility({
+    user: req.user, // Passport attaches user here
+    db: prisma,
+  });
+  next();
+});
+
+// 4. Use permissions
+app.delete('/posts/:id', async (req, res) => {
+  try {
+    const { authorize } = req.ability;
+    const post = await prisma.post.findUnique({
+      where: { id: req.params.id },
+    });
+
+    await authorize(canDeletePost, post);
+    await prisma.post.delete({ where: { id: req.params.id } });
+
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+```
+
+**With JWT Strategy:**
+
+```typescript
+import { Strategy as JwtStrategy, ExtractJwt } from 'passport-jwt';
+
+passport.use(
+  new JwtStrategy(
+    {
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      secretOrKey: process.env.JWT_SECRET,
+    },
+    async (payload, done) => {
+      const user = await db.user.findUnique({ where: { id: payload.sub } });
+      return done(null, user || false);
+    }
+  )
+);
+
+// Then use the same pattern as above
+app.use(passport.authenticate('jwt', { session: false }));
+app.use((req, res, next) => {
+  req.ability = withAbility({ user: req.user, db: prisma });
+  next();
+});
+```
+
+### Supabase Auth
+
+[Supabase](https://supabase.com/) provides auth, database, and real-time subscriptions.
+
+**With Next.js Server Components:**
+
+```typescript
+// app/actions/posts.ts
+'use server';
+
+import { createServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
+import { withAbility } from 'granter';
+import { canDeletePost } from '@/lib/permissions';
+
+export async function deletePost(postId: string) {
+  // 1. Create Supabase client
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { cookies }
+  );
+
+  // 2. Get authenticated user
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+  if (error || !user) {
+    throw new Error('Not authenticated');
+  }
+
+  // 3. Create granter context
+  const ctx = withAbility({
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.user_metadata.role,
+    },
+    supabase,
+  });
+
+  // 4. Check permissions
+  const { data: post } = await supabase.from('posts').select('*').eq('id', postId).single();
+
+  await ctx.authorize(canDeletePost, post);
+
+  // 5. Execute delete
+  await supabase.from('posts').delete().eq('id', postId);
+}
+```
+
+**Combining with Row Level Security (RLS):**
+
+```typescript
+// Supabase RLS provides database-level security
+// granter adds application-level permission logic
+
+// You can use both together:
+// - RLS: Ensures users can only see their own data at DB level
+// - granter: Adds complex business rules (e.g., admins can see all)
+
+const canViewPost = or(
+  permission('isPostOwner', async (ctx, post) => {
+    // RLS already filters, but we check for admin override
+    return post.authorId === ctx.user.id;
+  }),
+  isAdmin // Admins bypass RLS with service role key
+);
+```
+
+### Custom JWT / Sessions
+
+**JWT Token Validation:**
+
+```typescript
+import jwt from 'jsonwebtoken';
+import { withAbility } from 'granter';
+
+const app = express();
+
+// 1. JWT validation middleware
+app.use(async (req, res, next) => {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+
+  if (!token) {
+    return res.status(401).json({ error: 'No token provided' });
+  }
+
+  try {
+    // Verify JWT
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Fetch user details
+    const user = await db.user.findUnique({
+      where: { id: payload.sub },
+    });
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    // 2. Create granter context
+    req.ability = withAbility({
+      user,
+      db,
+      loaders: createDataLoaders(db), // Optional: add DataLoader
+    });
+
+    next();
+  } catch (error) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+});
+
+// 3. Use in routes
+app.get('/posts', async (req, res) => {
+  const { filter, user } = req.ability;
+  const allPosts = await db.post.findMany();
+  const viewable = await filter(canViewPost, allPosts);
+  res.json(viewable);
+});
+```
+
+**Cookie-based Sessions:**
+
+```typescript
+import session from 'express-session';
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    store: new RedisStore({ client: redisClient }),
+  })
+);
+
+// Session middleware
+app.use(async (req, res, next) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: req.session.userId },
+  });
+
+  req.ability = withAbility({ user, db });
+  next();
+});
+```
+
+### OAuth (Without Library)
+
+**Google OAuth Example:**
+
+```typescript
+import { google } from 'googleapis';
+import { withAbility } from 'granter';
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  process.env.GOOGLE_REDIRECT_URI
+);
+
+// OAuth callback handler
+app.get('/auth/google/callback', async (req, res) => {
+  const { code } = req.query;
+
+  // 1. Exchange code for tokens
+  const { tokens } = await oauth2Client.getToken(code);
+  oauth2Client.setCredentials(tokens);
+
+  // 2. Get user info
+  const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+  const { data: googleUser } = await oauth2.userinfo.get();
+
+  // 3. Find or create user in your DB
+  let user = await db.user.findUnique({
+    where: { email: googleUser.email },
+  });
+
+  if (!user) {
+    user = await db.user.create({
+      data: {
+        email: googleUser.email,
+        name: googleUser.name,
+        picture: googleUser.picture,
+      },
+    });
+  }
+
+  // 4. Create session
+  req.session.userId = user.id;
+
+  res.redirect('/dashboard');
+});
+
+// Use in routes with granter
+app.use(async (req, res, next) => {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const user = await db.user.findUnique({
+    where: { id: req.session.userId },
+  });
+
+  req.ability = withAbility({ user, db });
+  next();
+});
+```
+
+**GitHub OAuth Example:**
+
+```typescript
+// Similar pattern - exchange code for access token
+app.get('/auth/github/callback', async (req, res) => {
+  const { code } = req.query;
+
+  // Exchange code for access token
+  const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    body: JSON.stringify({
+      client_id: process.env.GITHUB_CLIENT_ID,
+      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      code,
+    }),
+  });
+
+  const { access_token } = await tokenResponse.json();
+
+  // Get user info
+  const userResponse = await fetch('https://api.github.com/user', {
+    headers: { Authorization: `Bearer ${access_token}` },
+  });
+
+  const githubUser = await userResponse.json();
+
+  // Create/find user, create session, etc.
+  // Then use granter as shown above
+});
+```
+
+### Best Practices
+
+#### 1. Separate Authentication from Authorization
+
+```typescript
+// ✅ Good: Clear separation
+async function deletePost(postId: string) {
+  // Step 1: Authentication (handled by middleware/library)
+  const session = await getSession();
+  if (!session) throw new Error('Not authenticated');
+
+  // Step 2: Create context
+  const ctx = { user: session.user, db };
+
+  // Step 3: Authorization (granter)
+  await authorize(ctx, canDelete, post);
+
+  // Step 4: Execute
+  await db.post.delete({ where: { id: postId } });
+}
+
+// ❌ Bad: Mixed concerns
+async function deletePost(postId: string) {
+  // Mixing auth and authz logic is confusing
+  if (!user.isLoggedIn && !user.isAdmin && post.authorId !== user.id) {
+    throw new Error('Access denied');
+  }
+}
+```
+
+#### 2. Design Your Context Carefully
+
+```typescript
+// ✅ Good: Include what you need for permissions
+type AppContext = {
+  user: {
+    id: string;
+    role: string;
+    email: string;
+    emailVerified: boolean;
+  };
+  db: PrismaClient;
+  loaders?: DataLoaders; // Optional: for batching
+};
+
+// ❌ Bad: Don't expose sensitive data
+type BadContext = {
+  user: {
+    password: string; // Never include!
+    accessToken: string; // Don't pass tokens around
+  };
+};
+```
+
+#### 3. Handle 401 vs 403 Correctly
+
+```typescript
+// 401 Unauthorized: User is not authenticated
+if (!session) {
+  throw new UnauthorizedError('Please log in');
+}
+
+// 403 Forbidden: User is authenticated but lacks permission
+await authorize(ctx, canDelete, post); // Throws ForbiddenError
+```
+
+#### 4. Use DataLoader for Performance
+
+```typescript
+// ✅ Good: Batch database queries
+import DataLoader from 'dataloader';
+
+const createLoaders = (db: PrismaClient) => ({
+  user: new DataLoader(async (ids: string[]) => {
+    const users = await db.user.findMany({
+      where: { id: { in: ids } },
+    });
+    return ids.map((id) => users.find((u) => u.id === id));
+  }),
+});
+
+// Use in context
+const ctx = withAbility({
+  user: session.user,
+  loaders: createLoaders(db),
+});
+
+// Permission using loader
+const isTeamMember = permission('isTeamMember', async (ctx, team) => {
+  const member = await ctx.loaders.user.load(ctx.user.id);
+  return member.teamIds.includes(team.id);
+});
+```
+
+#### 5. Don't Validate Tokens in Permissions
+
+```typescript
+// ❌ Bad: Don't validate auth tokens in permissions
+const isAdmin = permission('isAdmin', async (ctx) => {
+  // Never do this - token validation belongs in auth middleware
+  const valid = await validateToken(ctx.token);
+  return valid && ctx.user.role === 'admin';
+});
+
+// ✅ Good: Assume authentication is already done
+const isAdmin = permission('isAdmin', (ctx) => {
+  return ctx.user.role === 'admin';
+});
+```
+
+#### 6. Test with Mock Contexts
+
+```typescript
+import { describe, it, expect } from 'vitest';
+import { can } from 'granter';
+
+describe('permissions', () => {
+  it('should allow admin to delete any post', async () => {
+    // Easy to test - just create mock context
+    const ctx = {
+      user: { id: '1', role: 'admin' },
+      db: mockDb,
+    };
+
+    const post = { id: '123', authorId: '999' };
+    expect(await can(ctx, canDelete, post)).toBe(true);
+  });
+});
 ```
 
 ## API Reference
@@ -426,16 +1181,10 @@ Create a permission. The check function can be sync or async. Use explicit types
 
 ```typescript
 // Recommended: explicit types
-const isAdmin = permission(
-  'isAdmin',
-  (ctx: AppContext) => ctx.user.role === 'admin'
-);
+const isAdmin = permission('isAdmin', (ctx: AppContext) => ctx.user.role === 'admin');
 
 // Also works: with generics
-const isAdmin = permission<AppContext>(
-  'isAdmin',
-  (ctx) => ctx.user.role === 'admin'
-);
+const isAdmin = permission<AppContext>('isAdmin', (ctx) => ctx.user.role === 'admin');
 ```
 
 ### `or(...permissions)`
@@ -485,8 +1234,8 @@ Require permission or throw `ForbiddenError`. Returns `Promise<void>`.
 await authorize(ctx, canDelete, post);
 
 // Custom error message
-await authorize(ctx, canDelete, post, { 
-  error: 'You cannot delete this post' 
+await authorize(ctx, canDelete, post, {
+  error: 'You cannot delete this post',
 });
 ```
 
@@ -521,8 +1270,8 @@ const enhancedCtx = withAbility(ctx);
 // Destructure what you need - works with both!
 const { user, db, authorize, filter } = enhancedCtx;
 
-console.log(user.id);  // Original context property
-await authorize(canEdit, post);  // Permission method
+console.log(user.id); // Original context property
+await authorize(canEdit, post); // Permission method
 const filtered = await filter(canRead, posts);
 
 // Perfect for middleware - enhance context in-place
@@ -565,18 +1314,18 @@ try {
 
 ```typescript
 // Custom message
-await authorize(ctx, canDelete, post, { 
-  error: 'You cannot delete this post' 
+await authorize(ctx, canDelete, post, {
+  error: 'You cannot delete this post',
 });
 
 // Custom error instance
 await authorize(ctx, canDelete, post, {
-  error: new CustomError('Denied')
+  error: new CustomError('Denied'),
 });
 
 // Error factory
 await authorize(ctx, canDelete, post, {
-  error: () => new Error(`User ${ctx.user.id} cannot delete`)
+  error: () => new Error(`User ${ctx.user.id} cannot delete`),
 });
 ```
 
@@ -591,6 +1340,7 @@ npm install -D @typescript-eslint/eslint-plugin @typescript-eslint/parser
 ```
 
 **`.eslintrc.js`:**
+
 ```javascript
 module.exports = {
   parser: '@typescript-eslint/parser',
@@ -602,6 +1352,7 @@ module.exports = {
 ```
 
 This catches:
+
 ```typescript
 authorize(ctx, canDelete, post); // ❌ ESLint error: Missing await
 await authorize(ctx, canDelete, post); // ✅ Correct
@@ -611,20 +1362,16 @@ await authorize(ctx, canDelete, post); // ✅ Correct
 
 ```typescript
 // ❌ N+1 queries
-const isOwner = permission('isOwner',
-  async (ctx, post) => {
-    const fullPost = await db.post.findUnique({ where: { id: post.id } });
-    return fullPost.authorId === ctx.user.id;
-  }
-);
+const isOwner = permission('isOwner', async (ctx, post) => {
+  const fullPost = await db.post.findUnique({ where: { id: post.id } });
+  return fullPost.authorId === ctx.user.id;
+});
 
 // ✅ Batched with DataLoader
-const isOwner = permission('isOwner',
-  async (ctx, post) => {
-    const fullPost = await ctx.loaders.post.load(post.id);
-    return fullPost.authorId === ctx.user.id;
-  }
-);
+const isOwner = permission('isOwner', async (ctx, post) => {
+  const fullPost = await ctx.loaders.post.load(post.id);
+  return fullPost.authorId === ctx.user.id;
+});
 ```
 
 ### 3. Compose, Don't Duplicate
@@ -655,14 +1402,14 @@ describe('permissions', () => {
   it('should allow admin to edit any post', async () => {
     const ctx = { user: { id: '1', role: 'admin' } };
     const post = { authorId: '999' };
-    
+
     expect(await can(ctx, canEditPost, post)).toBe(true);
   });
-  
+
   it('should deny non-owner', async () => {
     const ctx = { user: { id: '1', role: 'user' } };
     const post = { authorId: '2' };
-    
+
     expect(await can(ctx, canEditPost, post)).toBe(false);
     await expect(authorize(ctx, canEditPost, post)).rejects.toThrow(ForbiddenError);
   });
