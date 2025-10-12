@@ -1,5 +1,7 @@
 import type { FirstNonUndefined, Permission } from '../types';
 import { permission } from '../utils/permission';
+import { checkWithExplain } from '../utils/explain';
+import { now } from '../utils/performance';
 
 /**
  * Combine permissions with OR logic
@@ -85,17 +87,29 @@ export function or<TContext, TResource>(
 ): Permission<TContext, TResource> {
   return permission<TContext, TResource>(
     `(${permissions.map((p) => p.name).join(' OR ')})`,
-    async (ctx, resource) => {
+    async (ctx, resource, onExplain) => {
+      const start = now();
+
       // Run all permission checks in parallel
-      const results = await Promise.all(
-        permissions.map((p) => {
-          // Always call with resource. If resource is undefined, it matches Permission<TContext, undefined>.
-          const result = p.check(ctx, resource);
-          return result instanceof Promise ? result : Promise.resolve(result);
-        })
+      const checks = await Promise.all(
+        permissions.map((p) => checkWithExplain(p, ctx, resource, onExplain))
       );
-      // Return true if any permission allows
-      return results.some((allowed) => allowed);
+
+      const finalResult = checks.some((check) => check.result);
+
+      // Call explain callback once for this OR operation
+      if (onExplain) {
+        const duration = now() - start;
+        onExplain({
+          name: `(${permissions.map((p) => p.name).join(' OR ')})`,
+          result: finalResult,
+          duration: Math.round(duration * 100) / 100,
+          operator: 'OR',
+          details: checks.map((check) => check.detail),
+        });
+      }
+
+      return finalResult;
     }
   );
 }

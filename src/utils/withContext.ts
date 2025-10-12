@@ -2,6 +2,7 @@ import { type Permission } from '../types';
 import { can } from './can';
 import { authorize, type AuthorizeOptions } from './authorize';
 import { filter } from './filter';
+import { explain } from './explain';
 
 /**
  * Context-bound permission utilities returned by withContext()
@@ -26,6 +27,12 @@ export type ContextBoundPermissions<TContext> = {
     p: Permission<TContext, TResource>,
     resources: TResource[]
   ) => Promise<TResource[]>;
+
+  explain(p: Permission<TContext>): Promise<import('../types').ExplanationResult>;
+  explain<TResource>(
+    p: Permission<TContext, TResource>,
+    resource: TResource
+  ): Promise<import('../types').ExplanationResult>;
 };
 
 export function withContext<TContext>(ctx: TContext): ContextBoundPermissions<TContext> {
@@ -40,5 +47,8 @@ export function withContext<TContext>(ctx: TContext): ContextBoundPermissions<TC
     ) => authorize(ctx, p, resource as TResource, options),
 
     filter: <T>(p: Permission<TContext, T>, resources: T[]) => filter(ctx, p, resources),
+
+    explain: <TResource = undefined>(p: Permission<TContext, TResource>, resource?: TResource) =>
+      explain(ctx, p, resource as TResource),
   };
 }

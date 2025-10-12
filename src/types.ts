@@ -1,10 +1,29 @@
 /**
+ * Explanation of a permission check
+ * Used for both top-level results and nested details
+ */
+export type ExplanationResult = {
+  name: string;
+  result: boolean;
+  duration: number;
+  operator?: 'OR' | 'AND' | 'NOT';
+  details?: ExplanationResult[];
+};
+
+/**
+ * Callback for collecting explanation details
+ * @internal
+ */
+export type ExplainCallback = (detail: ExplanationResult) => void;
+
+/**
  * A function that checks if an action is allowed
  * Can be synchronous or asynchronous
  */
 export type PermissionCheck<TContext, TResource = undefined> = (
   ctx: TContext,
-  resource: TResource
+  resource: TResource,
+  onExplain?: ExplainCallback
 ) => Promise<boolean> | boolean;
 
 /**

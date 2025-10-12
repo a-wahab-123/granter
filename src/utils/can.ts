@@ -12,7 +12,10 @@ import type { Permission } from '../types';
  * ```
  */
 
-export async function can<TContext>(ctx: TContext, p: Permission<TContext>): Promise<boolean>;
+export async function can<TContext>(
+  ctx: TContext,
+  p: Permission<TContext>,
+): Promise<boolean>;
 export async function can<TContext, TResource>(
   ctx: TContext,
   p: Permission<TContext, TResource>,
