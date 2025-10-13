@@ -14,7 +14,7 @@ export function baseOptions(): BaseLayoutProps {
       },
       {
         text: 'GitHub',
-        url: 'https://github.com/seeden/whocan',
+        url: 'https://github.com/seeden/granter',
         external: true,
       },
       {

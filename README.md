@@ -230,4 +230,4 @@ MIT © [seeden](https://github.com/seeden)
 
 ---
 
-**📚 [View Full Documentation](https://seeden.github.io/granter)** | **[GitHub](https://github.com/seeden/whocan)** | **[npm](https://www.npmjs.com/package/granter)**
+**📚 [View Full Documentation](https://seeden.github.io/granter)** | **[GitHub](https://github.com/seeden/granter)** | **[npm](https://www.npmjs.com/package/granter)**

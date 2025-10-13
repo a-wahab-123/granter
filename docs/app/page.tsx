@@ -19,7 +19,7 @@ export default function HomePage() {
             Get Started
           </Link>
           <a
-            href="https://github.com/seeden/whocan"
+            href="https://github.com/seeden/granter"
             target="_blank"
             rel="noopener noreferrer"
             className="px-8 py-3 border border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600 rounded-lg font-medium transition-colors"
