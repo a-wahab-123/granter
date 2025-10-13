@@ -9,7 +9,7 @@
 
 ✨ **Composable** - Build complex permissions from simple rules  
 🔒 **Type-safe** - Full TypeScript inference with generic contexts  
-⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader 
+⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader  
 🔧 **Framework-agnostic** - Works everywhere  
 🪶 **Zero dependencies**
 
@@ -184,6 +184,7 @@ const mixed = or(isCommentOwner, isPostOwner); // TypeScript error!
 ```
 
 **Performance:** Both `or()` and `and()` run sequentially with short-circuit evaluation by default:
+
 - `or()` stops at the first success (efficient when early checks are likely to pass)
 - `and()` stops at the first failure (efficient when you order cheap checks first)
 
@@ -220,12 +221,12 @@ console.log(explanation);
 
 Every permission has these methods:
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `permission(ctx, resource)` | `Promise<boolean>` | Direct call - checks if allowed |
-| `.orThrow(ctx, resource, error?)` | `Promise<void>` | Throws `ForbiddenError` if denied |
-| `.filter(ctx, resources)` | `Promise<T[]>` | Filter array to allowed items |
-| `.explain(ctx, resource)` | `Promise<ExplanationResult>` | Debug why permission passed/failed |
+| Method                            | Returns                      | Description                        |
+| --------------------------------- | ---------------------------- | ---------------------------------- |
+| `permission(ctx, resource)`       | `Promise<boolean>`           | Direct call - checks if allowed    |
+| `.orThrow(ctx, resource, error?)` | `Promise<void>`              | Throws `ForbiddenError` if denied  |
+| `.filter(ctx, resources)`         | `Promise<T[]>`               | Filter array to allowed items      |
+| `.explain(ctx, resource)`         | `Promise<ExplanationResult>` | Debug why permission passed/failed |
 
 ### Simplifying with Closures
 
@@ -1176,11 +1177,13 @@ await canEditPar(ctx, post);
 ```
 
 **When to use parallel operators:**
+
 - ✅ You're using DataLoader or similar batching
 - ✅ Checks have similar cost/speed
 - ✅ You want all checks to run (e.g., for metrics/logging)
 
 **When to use sequential (default):**
+
 - ✅ Early checks are likely to succeed (`or`) or fail (`and`)
 - ✅ Early checks are much faster than later ones
 - ✅ You want to minimize unnecessary work

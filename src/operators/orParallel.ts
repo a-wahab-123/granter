@@ -16,7 +16,7 @@ import { operatorPermission } from '../utils/operatorPermission';
  * ```typescript
  * // With DataLoader - all checks run in parallel and batch DB queries
  * const canEdit = orParallel(isOwner, isAdmin, isModerator);
- * 
+ *
  * // Even if isOwner succeeds, isAdmin and isModerator still execute
  * // allowing DataLoader to batch all user/permission lookups
  * ```
@@ -85,10 +85,9 @@ export function orParallel<TContext, TResource = undefined>(
     async (ctx: TContext, resource: TResource) => {
       // Run all checks in parallel (no short-circuit)
       const results = await Promise.all(
-        permissions.map((p) => p(ctx, ...(resource !== undefined ? [resource] : []) as any))
+        permissions.map((p) => p(ctx, ...((resource !== undefined ? [resource] : []) as any)))
       );
       return results.some((result) => result);
-    },
+    }
   );
 }
-

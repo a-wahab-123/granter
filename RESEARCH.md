@@ -1,3 +1,2 @@
- - better filter example
- - add example with services/permissions - one place where user is definig his permissions
-
+- better filter example
+- add example with services/permissions - one place where user is definig his permissions

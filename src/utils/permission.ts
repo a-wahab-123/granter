@@ -10,12 +10,12 @@ import { now } from './now';
  * const isAdmin = permission('isAdmin',
  *   (ctx) => ctx.user.role === 'admin'
  * );
- * 
+ *
  * // Call directly
  * if (await isAdmin(ctx)) {
  *   // User is admin
  * }
- * 
+ *
  * // Or use methods
  * await isAdmin.orThrow(ctx);
  * const why = await isAdmin.explain(ctx);
@@ -31,11 +31,11 @@ export type PermissionCheck<TContext, TResource = undefined> = (
 export type Permission<TContext, TResource = undefined> = {
   // Callable - resource optional when TResource = undefined
   (ctx: TContext, ...args: TResource extends undefined ? [] : [TResource]): Promise<boolean>;
-  
+
   // Metadata
   name: string;
   children?: Permission<TContext, TResource>[];
-  
+
   // Methods - resource optional when TResource = undefined
   orThrow(
     ctx: TContext,
@@ -43,9 +43,9 @@ export type Permission<TContext, TResource = undefined> = {
       ? [error?: string | Error | (() => Error)]
       : [resource: TResource, error?: string | Error | (() => Error)]
   ): Promise<void>;
-  
+
   filter(ctx: TContext, resources: TResource[]): Promise<TResource[]>;
-  
+
   explain(
     ctx: TContext,
     ...args: TResource extends undefined ? [] : [TResource]
@@ -69,7 +69,6 @@ export function permission<TContext, TResource = undefined>(
   check: PermissionCheck<TContext, TResource>,
   children?: Permission<TContext, TResource>[]
 ): Permission<TContext, TResource> {
-
   const fn = async (ctx: TContext, ...args: any[]): Promise<boolean> => {
     const resource = args[0] as TResource;
     return await check(ctx, resource);
@@ -79,7 +78,7 @@ export function permission<TContext, TResource = undefined>(
     value: name,
     writable: false,
     enumerable: false,
-    configurable: true
+    configurable: true,
   });
 
   if (children && children.length > 0) {
@@ -89,12 +88,16 @@ export function permission<TContext, TResource = undefined>(
   fn.orThrow = async (ctx: TContext, ...args: any[]): Promise<void> => {
     // For context-only: args = [error?]
     // For resource: args = [resource, error?]
-    const hasResource = args.length >= 1 && (typeof args[0] !== 'string' && typeof args[0] !== 'function' && !(args[0] instanceof Error));
+    const hasResource =
+      args.length >= 1 &&
+      typeof args[0] !== 'string' &&
+      typeof args[0] !== 'function' &&
+      !(args[0] instanceof Error);
     const resource = hasResource ? args[0] : undefined;
     const error = hasResource ? args[1] : args[0];
-    
+
     const allowed = await fn(ctx, ...(resource !== undefined ? [resource] : []));
-    
+
     if (!allowed) {
       if (!error) {
         throw new ForbiddenError(`Permission denied: ${name}`);
@@ -111,12 +114,12 @@ export function permission<TContext, TResource = undefined>(
       throw error;
     }
   };
-  
+
   fn.filter = async (ctx: TContext, resources: TResource[]): Promise<TResource[]> => {
     const results = await Promise.all(resources.map((r) => fn(ctx, r as any)));
     return resources.filter((_, i) => results[i]);
   };
-  
+
   fn.explain = async (ctx: TContext, ...args: any[]): Promise<ExplanationResult> => {
     const resource = args[0];
     const start = now();
@@ -126,7 +129,7 @@ export function permission<TContext, TResource = undefined>(
     const result: ExplanationResult = {
       name,
       value,
-      duration
+      duration,
     };
 
     if (fn.children && fn.children.length > 0) {
@@ -137,6 +140,6 @@ export function permission<TContext, TResource = undefined>(
 
     return result;
   };
-  
+
   return fn as Permission<TContext, TResource>;
 }

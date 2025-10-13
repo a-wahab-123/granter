@@ -1,5 +1,14 @@
 import { expectType, expectError, expectAssignable } from 'tsd';
-import { permission, or, and, not, orParallel, andParallel, type Permission, type ExplanationResult } from '..';
+import {
+  permission,
+  or,
+  and,
+  not,
+  orParallel,
+  andParallel,
+  type Permission,
+  type ExplanationResult,
+} from '..';
 
 // Test types
 type Post = { authorId: string };

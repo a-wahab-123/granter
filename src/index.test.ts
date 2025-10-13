@@ -126,7 +126,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
 
       const result = await combined(ctx);
-      
+
       expect(result).toBe(true);
       // Should only check perm1 and perm2, not perm3 (short-circuit)
       expect(checkOrder).toEqual([1, 2]);
@@ -154,7 +154,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
 
       await combined(ctx);
-      
+
       // Sequential: checks run in order
       expect(checkOrder).toEqual([1, 2, 3]);
     });
@@ -272,7 +272,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
 
       const result = await combined(ctx);
-      
+
       expect(result).toBe(false);
       // Should only check perm1 and perm2, not perm3 (short-circuit)
       expect(checkOrder).toEqual([1, 2]);
@@ -380,7 +380,6 @@ describe('granter', () => {
     });
   });
 
-
   describe('errors', () => {
     it('should create PermissionError', () => {
       const error = new PermissionError('test');
@@ -483,7 +482,7 @@ describe('granter', () => {
       const hasAccess = and(isAuthenticated, isModerator);
       const ctx = { user: { id: '1', role: 'moderator' } };
 
-        expect(await hasAccess(ctx)).toBe(true);
+      expect(await hasAccess(ctx)).toBe(true);
     });
 
     it('should fail when resource-specific permission fails', async () => {

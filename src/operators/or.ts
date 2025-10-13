@@ -90,13 +90,12 @@ export function or<TContext, TResource = undefined>(
     async (ctx: TContext, resource: TResource) => {
       // Check permissions sequentially with short-circuit
       for (const p of permissions) {
-        const result = await p(ctx, ...(resource !== undefined ? [resource] : []) as any);
+        const result = await p(ctx, ...((resource !== undefined ? [resource] : []) as any));
         if (result) {
           return true;
         }
       }
       return false;
-    },
+    }
   );
 }
-
