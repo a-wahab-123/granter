@@ -78,6 +78,19 @@ console.log(explanation);
 //     { name: "isAdmin", value: false, duration: 7.11 }
 //   ]
 // }
+
+// 5. Optional: Bind context for cleaner code
+import { withContext } from 'granter';
+
+const abilities = withContext(ctx, {
+  canEditPost,
+  isAdmin,
+});
+
+// No need to pass ctx anymore!
+if (await abilities.canEditPost(post)) {
+  await db.updatePost(post);
+}
 ```
 
 ## Installation
@@ -228,36 +241,98 @@ Every permission has these methods:
 | `.filter(ctx, resources)`         | `Promise<T[]>`               | Filter array to allowed items      |
 | `.explain(ctx, resource)`         | `Promise<ExplanationResult>` | Debug why permission passed/failed |
 
-### Simplifying with Closures
+### Simplifying with `withContext()`
 
-If you're checking many permissions with the same context, create your own closure:
+When you need to call many permissions with the same context, use `withContext()` to bind the context once:
 
 ```typescript
-// Create a closure that captures context
-const createAbilities = (ctx: AppContext) => ({
-  canEdit: (post: Post) => canEdit(ctx, post),
-  canEditOrThrow: (post: Post) => canEdit.orThrow(ctx, post),
-  canDelete: (post: Post) => canDelete(ctx, post),
-  canDeleteOrThrow: (post: Post) => canDelete.orThrow(ctx, post),
+import { withContext } from 'granter';
+
+// Bind context to your permissions
+const abilities = withContext(ctx, {
+  canEditPost,
+  canDeletePost,
+  canViewPost,
 });
 
-// Use it
-const abilities = createAbilities(ctx);
-if (await abilities.canEdit(post)) {
-  await abilities.canEditOrThrow(post);
+// Now call without ctx!
+if (await abilities.canEditPost(post)) {
+  await updatePost(post);
 }
 
-// Or store in middleware
-// Express
+if (await abilities.canDeletePost(post)) {
+  await deletePost(post);
+}
+```
+
+**Express.js middleware pattern:**
+
+```typescript
 app.use((req, res, next) => {
-  req.abilities = createAbilities(getContext(req));
+  const ctx = { user: req.user, db: req.app.locals.db };
+
+  // Bind only the permissions you need
+  req.abilities = withContext(ctx, {
+    isAuthenticated,
+    isAdmin,
+    canEditPost,
+    canDeletePost,
+    canViewPost,
+  });
+
   next();
 });
 
-// Then use
-const { canEdit, canEditOrThrow } = req.abilities;
-if (await canEdit(post)) {
-  await canEditOrThrow(post);
+// Use in routes without ctx!
+app.put('/posts/:id', async (req, res) => {
+  const post = await getPost(req.params.id);
+
+  if (!(await req.abilities.canEditPost(post))) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  // Update post...
+});
+```
+
+**React context pattern:**
+
+```typescript
+const AbilitiesContext = createContext(null);
+
+export function AbilitiesProvider({ children, user, db }) {
+  const ctx = { user, db };
+
+  const abilities = useMemo(
+    () => withContext(ctx, {
+      isAuthenticated,
+      canEditPost,
+      canDeletePost,
+    }),
+    [user, db]
+  );
+
+  return (
+    <AbilitiesContext.Provider value={abilities}>
+      {children}
+    </AbilitiesContext.Provider>
+  );
+}
+
+// Use in components
+function PostCard({ post }) {
+  const abilities = useContext(AbilitiesContext);
+  const [canEdit, setCanEdit] = useState(false);
+
+  useEffect(() => {
+    abilities.canEditPost(post).then(setCanEdit);
+  }, [post]);
+
+  return (
+    <div>
+      {canEdit && <button>Edit</button>}
+    </div>
+  );
 }
 ```
 
@@ -1273,79 +1348,67 @@ Negate a permission.
 const canComment = and(isAuthenticated, not(isBanned));
 ```
 
-### `can(ctx, permission, resource?)`
+### `withContext(ctx, permissions)`
 
-Check if permission allows access. Returns `Promise<boolean>`.
+Bind context to specific permissions so you don't need to pass `ctx` repeatedly.
+
+**Type signature:**
 
 ```typescript
-if (await can(ctx, canEdit, post)) {
-  await updatePost(post);
+function withContext<TContext, T extends Record<string, Permission<TContext, any>>>(
+  ctx: TContext,
+  permissions: T
+): BoundPermissions<TContext, T>;
+```
+
+**Usage:**
+
+```typescript
+import { withContext } from 'granter';
+
+// Bind context to permissions
+const abilities = withContext(ctx, {
+  isAuthenticated,
+  isAdmin,
+  canEditPost,
+  canDeletePost,
+});
+
+// Call without ctx
+if (await abilities.isAuthenticated()) {
+  if (await abilities.canEditPost(post)) {
+    await updatePost(post);
+  }
 }
 ```
 
-### `authorize(ctx, permission, resource?, options?)`
+**Benefits:**
 
-Require permission or throw `ForbiddenError`. Returns `Promise<void>`.
+- ✅ Pick only the permissions you need
+- ✅ No need to pass `ctx` repeatedly
+- ✅ Type-safe with full inference
+- ✅ Perfect for Express middleware or React context
+- ✅ Non-function properties are preserved
 
-```typescript
-// Basic
-await authorize(ctx, canDelete, post);
-
-// Custom error message
-await authorize(ctx, canDelete, post, {
-  error: 'You cannot delete this post',
-});
-```
-
-### `filter(ctx, permission, resources)`
-
-Filter array to only allowed items. Returns `Promise<T[]>`.
+**Express middleware:**
 
 ```typescript
-const allPosts = await getPosts();
-const editablePosts = await filter(ctx, canEdit, allPosts);
-```
-
-### `withContext(ctx)`
-
-Create permission utilities bound to a context. Returns just the permission methods.
-
-```typescript
-const { can, authorize, filter } = withContext(ctx);
-
-await authorize(canRead);
-const posts = await filter(canEdit, allPosts);
-```
-
-### `withAbility(ctx)`
-
-Create an enhanced context with permission methods attached. Returns the context spread with permission utilities. Since it includes the original context, you can destructure both context properties and permission methods.
-
-```typescript
-const enhancedCtx = withAbility(ctx);
-// enhancedCtx = { ...ctx, can, authorize, filter }
-
-// Destructure what you need - works with both!
-const { user, db, authorize, filter } = enhancedCtx;
-
-console.log(user.id); // Original context property
-await authorize(canEdit, post); // Permission method
-const filtered = await filter(canRead, posts);
-
-// Perfect for middleware - enhance context in-place
-// Express
 app.use((req, res, next) => {
-  req.ability = withAbility(getContext(req));
+  req.abilities = withContext(getContext(req), {
+    isAuthenticated,
+    canEditPost,
+    canDeletePost,
+  });
   next();
 });
-// Then: const { authorize, user } = req.ability;
 
-// Hono - store as 'ctx' since it includes everything
-app.use('*', async (c, next) => {
-  c.set('ctx', withAbility(getBaseContext(c)));
-  await next();
+// Use in routes
+app.put('/posts/:id', async (req, res) => {
+  if (!(await req.abilities.canEditPost(post))) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  // ...
 });
-// Then: const { authorize, user } = c.get('ctx');
 ```
 
 ## Error Handling
