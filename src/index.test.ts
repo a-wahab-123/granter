@@ -71,7 +71,7 @@ describe('granter', () => {
     it('should allow if any permission allows', async () => {
       const canAccess = or(isAdmin);
       const ctx = { user: { id: '1', role: 'admin' } };
-      expect(await canAccess(ctx)).toBe(true);
+      expect(await canAccess(ctx, post)).toBe(true);
     });
 
     it('should allow if any permission allows', async () => {

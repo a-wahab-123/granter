@@ -22,24 +22,34 @@ import { now } from './now';
  * ```
  */
 
-
-
 export type PermissionCheck<TContext, TResource = undefined> = (
   ctx: TContext,
   resource: TResource
 ) => Promise<boolean> | boolean;
 
+// Base permission type
 export type Permission<TContext, TResource = undefined> = {
-  (ctx: TContext, resource: TResource): Promise<boolean>;
-
+  // Callable - resource optional when TResource = undefined
+  (ctx: TContext, ...args: TResource extends undefined ? [] : [TResource]): Promise<boolean>;
+  
   // Metadata
   name: string;
-  permissions: Permission<TContext, TResource>[];
-
-  // Methods
-  orThrow(ctx: TContext, resource: TResource, error?:string | Error | (() => Error)): Promise<void>;
+  children?: Permission<TContext, TResource>[];
+  
+  // Methods - resource optional when TResource = undefined
+  orThrow(
+    ctx: TContext,
+    ...args: TResource extends undefined
+      ? [error?: string | Error | (() => Error)]
+      : [resource: TResource, error?: string | Error | (() => Error)]
+  ): Promise<void>;
+  
   filter(ctx: TContext, resources: TResource[]): Promise<TResource[]>;
-  explain(ctx: TContext, resource: TResource): Promise<ExplanationResult>;
+  
+  explain(
+    ctx: TContext,
+    ...args: TResource extends undefined ? [] : [TResource]
+  ): Promise<ExplanationResult>;
 };
 
 export type PermissionResourceType<P> = P extends Permission<any, infer R> ? R : never;
@@ -47,20 +57,21 @@ export type PermissionResourceType<P> = P extends Permission<any, infer R> ? R :
 export function permission<TContext>(
   name: string,
   check: PermissionCheck<TContext, undefined>,
-  permissions?: Permission<TContext, undefined>[]
+  children?: Permission<TContext, undefined>[]
 ): Permission<TContext, undefined>;
 export function permission<TContext, TResource>(
   name: string,
   check: PermissionCheck<TContext, TResource>,
-  permissions?: Permission<TContext, TResource>[]
+  children?: Permission<TContext, TResource>[]
 ): Permission<TContext, TResource>;
 export function permission<TContext, TResource = undefined>(
   name: string,
   check: PermissionCheck<TContext, TResource>,
-  permissions: Permission<TContext, TResource>[] = []
+  children?: Permission<TContext, TResource>[]
 ): Permission<TContext, TResource> {
 
-  const fn = async (ctx: TContext, resource: TResource): Promise<boolean> => {
+  const fn = async (ctx: TContext, ...args: any[]): Promise<boolean> => {
+    const resource = args[0] as TResource;
     return await check(ctx, resource);
   };
 
@@ -71,10 +82,20 @@ export function permission<TContext, TResource = undefined>(
     configurable: true
   });
 
-  fn.permissions = permissions;
+  if (children && children.length > 0) {
+    fn.children = children;
+  }
 
-  fn.orThrow = async (ctx: TContext, resource: TResource, error?:string | Error | (() => Error)): Promise<void> => {
-    if (!(await fn(ctx, resource))) {
+  fn.orThrow = async (ctx: TContext, ...args: any[]): Promise<void> => {
+    // For context-only: args = [error?]
+    // For resource: args = [resource, error?]
+    const hasResource = args.length >= 1 && (typeof args[0] !== 'string' && typeof args[0] !== 'function' && !(args[0] instanceof Error));
+    const resource = hasResource ? args[0] : undefined;
+    const error = hasResource ? args[1] : args[0];
+    
+    const allowed = await fn(ctx, ...(resource !== undefined ? [resource] : []));
+    
+    if (!allowed) {
       if (!error) {
         throw new ForbiddenError(`Permission denied: ${name}`);
       }
@@ -92,13 +113,14 @@ export function permission<TContext, TResource = undefined>(
   };
   
   fn.filter = async (ctx: TContext, resources: TResource[]): Promise<TResource[]> => {
-    const results = await Promise.all(resources.map((r) => fn(ctx, r)));
+    const results = await Promise.all(resources.map((r) => fn(ctx, r as any)));
     return resources.filter((_, i) => results[i]);
   };
   
-  fn.explain = async (ctx: TContext, resource: TResource): Promise<ExplanationResult> => {
+  fn.explain = async (ctx: TContext, ...args: any[]): Promise<ExplanationResult> => {
+    const resource = args[0];
     const start = now();
-    const value = await fn(ctx, resource);
+    const value = await fn(ctx, ...(resource !== undefined ? [resource] : []));
     const duration = now() - start;
 
     const result: ExplanationResult = {
@@ -107,8 +129,10 @@ export function permission<TContext, TResource = undefined>(
       duration
     };
 
-    if (permissions) {
-      result.children = await Promise.all(permissions.map((p) => p.explain(ctx, resource)));
+    if (fn.children && fn.children.length > 0) {
+      result.children = await Promise.all(
+        fn.children.map((p: any) => p.explain(ctx, ...(resource !== undefined ? [resource] : [])))
+      );
     }
 
     return result;

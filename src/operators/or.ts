@@ -81,7 +81,7 @@ export function or<
   FirstNonUndefined<[TResource1, TResource2, TResource3, TResource4, TResource5, TResource6]>
 >;
 
-export function or<TContext, TResource>(
+export function or<TContext, TResource = undefined>(
   ...permissions: Permission<TContext, TResource>[]
 ): Permission<TContext, TResource> {
   return operatorPermission<TContext, TResource>(
@@ -89,7 +89,7 @@ export function or<TContext, TResource>(
     permissions,
     async (ctx: TContext, resource: TResource) => {
       const results = await Promise.all(
-        permissions.map((p) => p(ctx, resource))
+        permissions.map((p) => p(ctx, ...(resource !== undefined ? [resource] : []) as any))
       );
       return results.some((result) => result);
     },

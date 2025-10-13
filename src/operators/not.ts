@@ -17,7 +17,7 @@ export function not<TContext, TResource>(
     'NOT',
     [p],
     async (ctx: TContext, resource: TResource) => {
-      const result = await p(ctx, resource);
+      const result = await p(ctx, ...(resource !== undefined ? [resource] : []) as any);
       return !result;
     }
   );
