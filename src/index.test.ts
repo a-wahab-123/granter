@@ -4,6 +4,8 @@ import {
   or,
   and,
   not,
+  orParallel,
+  andParallel,
   PermissionError,
   UnauthorizedError,
   ForbiddenError,
@@ -71,7 +73,7 @@ describe('granter', () => {
     it('should allow if any permission allows', async () => {
       const canAccess = or(isAdmin);
       const ctx = { user: { id: '1', role: 'admin' } };
-      expect(await canAccess(ctx, post)).toBe(true);
+      expect(await canAccess(ctx)).toBe(true);
     });
 
     it('should allow if any permission allows', async () => {
@@ -99,7 +101,73 @@ describe('granter', () => {
       expect(await canAccess(ctx, post)).toBe(true);
     });
 
-    it('should run all checks in parallel', async () => {
+    it('should short-circuit on first success', async () => {
+      const checkOrder: number[] = [];
+
+      const perm1 = permission<TestContext>('perm1', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        checkOrder.push(1);
+        return false;
+      });
+
+      const perm2 = permission<TestContext>('perm2', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        checkOrder.push(2);
+        return true; // This succeeds
+      });
+
+      const perm3 = permission<TestContext>('perm3', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        checkOrder.push(3);
+        return false;
+      });
+
+      const combined = or(perm1, perm2, perm3);
+      const ctx = { user: { id: '1', role: 'user' } };
+
+      const result = await combined(ctx);
+      
+      expect(result).toBe(true);
+      // Should only check perm1 and perm2, not perm3 (short-circuit)
+      expect(checkOrder).toEqual([1, 2]);
+    });
+
+    it('should run checks sequentially', async () => {
+      const checkOrder: number[] = [];
+
+      const perm1 = permission<TestContext>('perm1', async () => {
+        checkOrder.push(1);
+        return false;
+      });
+
+      const perm2 = permission<TestContext>('perm2', async () => {
+        checkOrder.push(2);
+        return false;
+      });
+
+      const perm3 = permission<TestContext>('perm3', async () => {
+        checkOrder.push(3);
+        return false;
+      });
+
+      const combined = or(perm1, perm2, perm3);
+      const ctx = { user: { id: '1', role: 'user' } };
+
+      await combined(ctx);
+      
+      // Sequential: checks run in order
+      expect(checkOrder).toEqual([1, 2, 3]);
+    });
+  });
+
+  describe('orParallel', () => {
+    it('should allow if any permission allows', async () => {
+      const canAccess = orParallel(isAdmin, isUser);
+      const ctx = { user: { id: '1', role: 'user' } };
+      expect(await canAccess(ctx)).toBe(true);
+    });
+
+    it('should run all checks in parallel (no short-circuit)', async () => {
       const checkOrder: number[] = [];
 
       const perm1 = permission<TestContext>('perm1', async () => {
@@ -111,7 +179,7 @@ describe('granter', () => {
       const perm2 = permission<TestContext>('perm2', async () => {
         await new Promise((resolve) => setTimeout(resolve, 10));
         checkOrder.push(2);
-        return false;
+        return true; // Even though this succeeds, perm3 still runs
       });
 
       const perm3 = permission<TestContext>('perm3', async () => {
@@ -120,13 +188,14 @@ describe('granter', () => {
         return false;
       });
 
-      const combined = or(perm1, perm2, perm3);
+      const combined = orParallel(perm1, perm2, perm3);
       const ctx = { user: { id: '1', role: 'user' } };
 
       const start = Date.now();
-      await combined(ctx);
+      const result = await combined(ctx);
       const duration = Date.now() - start;
 
+      expect(result).toBe(true);
       // Should complete in ~30ms (parallel) not ~60ms (sequential)
       expect(duration).toBeLessThan(50);
 
@@ -156,7 +225,7 @@ describe('granter', () => {
       const perm2 = createBatchedPermission(2, false);
       const perm3 = createBatchedPermission(3, true);
 
-      const combined = or(perm1, perm2, perm3);
+      const combined = orParallel(perm1, perm2, perm3);
       const ctx = { user: { id: '1', role: 'user' } };
 
       const result = await combined(ctx);
@@ -179,6 +248,81 @@ describe('granter', () => {
       const both = and(isAdmin, isUser);
       const ctx = { user: { id: '1', role: 'admin' } };
       expect(await both(ctx)).toBe(false);
+    });
+
+    it('should short-circuit on first failure', async () => {
+      const checkOrder: number[] = [];
+
+      const perm1 = permission<TestContext>('perm1', async () => {
+        checkOrder.push(1);
+        return true;
+      });
+
+      const perm2 = permission<TestContext>('perm2', async () => {
+        checkOrder.push(2);
+        return false; // This fails
+      });
+
+      const perm3 = permission<TestContext>('perm3', async () => {
+        checkOrder.push(3);
+        return true;
+      });
+
+      const combined = and(perm1, perm2, perm3);
+      const ctx = { user: { id: '1', role: 'user' } };
+
+      const result = await combined(ctx);
+      
+      expect(result).toBe(false);
+      // Should only check perm1 and perm2, not perm3 (short-circuit)
+      expect(checkOrder).toEqual([1, 2]);
+    });
+  });
+
+  describe('andParallel', () => {
+    it('should allow only if all permissions allow', async () => {
+      const isAuthenticated = permission<TestContext>('isAuthenticated', (ctx) => !!ctx.user);
+      const both = andParallel(isAuthenticated, isUser);
+      const ctx = { user: { id: '1', role: 'user' } };
+      expect(await both(ctx)).toBe(true);
+    });
+
+    it('should run all checks in parallel (no short-circuit)', async () => {
+      const checkOrder: number[] = [];
+
+      const perm1 = permission<TestContext>('perm1', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        checkOrder.push(1);
+        return true;
+      });
+
+      const perm2 = permission<TestContext>('perm2', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        checkOrder.push(2);
+        return false; // Even though this fails, perm3 still runs
+      });
+
+      const perm3 = permission<TestContext>('perm3', async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        checkOrder.push(3);
+        return true;
+      });
+
+      const combined = andParallel(perm1, perm2, perm3);
+      const ctx = { user: { id: '1', role: 'user' } };
+
+      const start = Date.now();
+      const result = await combined(ctx);
+      const duration = Date.now() - start;
+
+      expect(result).toBe(false);
+      // Should complete in ~30ms (parallel) not ~60ms (sequential)
+      expect(duration).toBeLessThan(50);
+
+      // Fastest check completes first
+      expect(checkOrder[0]).toBe(2); // 10ms check
+      expect(checkOrder[1]).toBe(3); // 20ms check
+      expect(checkOrder[2]).toBe(1); // 30ms check
     });
   });
 

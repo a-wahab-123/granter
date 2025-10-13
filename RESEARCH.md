@@ -1,8 +1,3 @@
-can(canEdit) is odd
-canEdit(ctx) is better but withContext(ctx) do not change canEdit 
-   1. check(canEdit)
-   2. can(canEdit) again
+ - better filter example
+ - add example with services/permissions - one place where user is definig his permissions
 
-canEdit(ctx)
-canEdit.authorize(ctx)
-canEdit.explain

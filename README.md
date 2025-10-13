@@ -9,40 +9,9 @@
 
 ✨ **Composable** - Build complex permissions from simple rules  
 🔒 **Type-safe** - Full TypeScript inference with generic contexts  
-⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader  
-🎯 **Simple API** - Callable permissions with methods  
+⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader 
 🔧 **Framework-agnostic** - Works everywhere  
 🪶 **Zero dependencies**
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Core Concepts](#core-concepts)
-  - [Authentication vs Authorization](#authentication-vs-authorization)
-  - [Permissions](#permissions)
-  - [Operators](#operators)
-  - [Checking Permissions](#checking-permissions)
-  - [Context Binding](#context-binding)
-  - [Enhanced Context with Abilities](#enhanced-context-with-abilities)
-- [Examples](#examples)
-  - [Express.js REST API](#expressjs-rest-api)
-  - [Hono REST API](#hono-rest-api)
-  - [GraphQL with DataLoader](#graphql-with-dataloader)
-  - [Next.js Server Actions](#nextjs-server-actions)
-- [Authentication Integration](#authentication-integration)
-  - [Auth.js / NextAuth.js](#authjs--nextauthjs)
-  - [Clerk](#clerk)
-  - [Passport.js](#passportjs)
-  - [Supabase Auth](#supabase-auth)
-  - [Custom JWT / Sessions](#custom-jwt--sessions)
-  - [OAuth (Without Library)](#oauth-without-library)
-  - [Best Practices](#best-practices)
-- [API Reference](#api-reference)
-- [Error Handling](#error-handling)
-- [Best Practices](#best-practices-1)
-- [Testing](#testing)
-- [Philosophy](#philosophy)
 
 ## Quick Start
 
@@ -69,7 +38,6 @@ const isAdmin = permission('isAdmin', (ctx: AppContext) => ctx.user.role === 'ad
 
 // With resource - entity-specific checks
 const isPostOwner = permission('isPostOwner', async (ctx: AppContext, post: Post) => {
-  if (!post) return false;
   return post.authorId === ctx.user.id;
 });
 
@@ -175,10 +143,10 @@ const isModerator = hasRole('moderator');
 Combine permissions with `or()`, `and()`, and `not()`:
 
 ```typescript
-// OR - any permission must allow (runs checks in parallel!)
+// OR - any permission must allow (runs sequentially, stops on first success)
 const canEdit = or(isOwner, isAdmin, isModerator);
 
-// AND - all permissions must allow (runs sequentially, stops on first false)
+// AND - all permissions must allow (runs sequentially, stops on first failure)
 const canPublish = and(isAuthenticated, isOwner, hasVerifiedEmail);
 
 // NOT - negate permission
@@ -212,10 +180,14 @@ const canEditPost = or(isPostOwner, isAdmin);
 const canDeletePost = and(isAuthenticated, isPostOwner);
 
 // ❌ Prevented: Mixing incompatible resource types
-const mixed = or(isPostOwner, isCommentOwner); // TypeScript error!
+const mixed = or(isCommentOwner, isPostOwner); // TypeScript error!
 ```
 
-**Performance:** `or()` runs all checks in parallel for better performance with async permissions. This is especially powerful with DataLoader, as all database queries will be batched together! `and()` runs sequentially and stops at the first failure, which is optimal when you have expensive checks ordered after cheap ones.
+**Performance:** Both `or()` and `and()` run sequentially with short-circuit evaluation by default:
+- `or()` stops at the first success (efficient when early checks are likely to pass)
+- `and()` stops at the first failure (efficient when you order cheap checks first)
+
+For DataLoader batching, use the parallel variants `orParallel()` and `andParallel()` (see Advanced section below).
 
 ### Using Permissions
 
@@ -306,7 +278,7 @@ const isPostOwner = permission('isPostOwner', async (ctx, post) => {
 const canDeletePost = or(isPostOwner, isAdmin);
 
 // Step 1: Authentication (happens first - use any auth library)
-app.use(authenticateUser); // Your auth middleware (Passport, JWT, etc.)
+app.use(authenticateUser); // Your auth middleware (better-auth, Passport, JWT, etc.)
 
 // Step 2: Create granter context from authenticated user
 app.use((req, res, next) => {
@@ -1163,6 +1135,79 @@ describe('permissions', () => {
 });
 ```
 
+## Advanced
+
+### Parallel Operators for DataLoader Batching
+
+By default, `or()` and `and()` run sequentially with short-circuit evaluation. For most use cases, this is the right choice. However, when using DataLoader or similar batching libraries, you may want all checks to run in parallel so database queries can be batched together.
+
+Use `orParallel()` and `andParallel()` for this:
+
+```typescript
+import { orParallel, andParallel } from 'granter';
+
+// Example: Using DataLoader for batching
+const userLoader = new DataLoader(async (ids) => {
+  // Batch load multiple users at once
+  return await db.users.findMany({ where: { id: { in: ids } } });
+});
+
+const isOwner = permission('isOwner', async (ctx, post: Post) => {
+  const owner = await userLoader.load(post.authorId);
+  return owner.id === ctx.user.id;
+});
+
+const isAdmin = permission('isAdmin', async (ctx) => {
+  const user = await userLoader.load(ctx.user.id);
+  return user.role === 'admin';
+});
+
+// Sequential (default) - checks run one by one
+const canEditSeq = or(isOwner, isAdmin);
+// If isOwner succeeds, isAdmin never runs
+
+// Parallel - all checks run simultaneously
+const canEditPar = orParallel(isOwner, isAdmin);
+// Both checks run, allowing DataLoader to batch the user lookups
+
+// Usage
+await canEditPar(ctx, post);
+// DataLoader batches both user lookups into a single database query!
+```
+
+**When to use parallel operators:**
+- ✅ You're using DataLoader or similar batching
+- ✅ Checks have similar cost/speed
+- ✅ You want all checks to run (e.g., for metrics/logging)
+
+**When to use sequential (default):**
+- ✅ Early checks are likely to succeed (`or`) or fail (`and`)
+- ✅ Early checks are much faster than later ones
+- ✅ You want to minimize unnecessary work
+- ✅ You're not using query batching
+
+### Custom Error Types
+
+You can throw custom errors with `orThrow()`:
+
+```typescript
+class PostNotFoundError extends Error {
+  constructor(postId: string) {
+    super(`Post ${postId} not found`);
+    this.name = 'PostNotFoundError';
+  }
+}
+
+// Throw custom error
+await canEdit.orThrow(ctx, post, () => new PostNotFoundError(post.id));
+
+// Throw with string (wraps in ForbiddenError)
+await canEdit.orThrow(ctx, post, 'You cannot edit this post');
+
+// Throw with Error instance
+await canEdit.orThrow(ctx, post, new UnauthorizedError('Login required'));
+```
+
 ## API Reference
 
 ### `permission(name, check)`
@@ -1179,23 +1224,43 @@ const isAdmin = permission<AppContext>('isAdmin', (ctx) => ctx.user.role === 'ad
 
 ### `or(...permissions)`
 
-Combine permissions with OR logic (any must allow). Runs all checks in **parallel** for better performance.
+Combine permissions with OR logic (any must allow). Runs checks **sequentially** and stops at the first success (short-circuit).
 
 ```typescript
 const canEdit = or(isOwner, isAdmin, isModerator);
 ```
 
-**Performance:** All permission checks run in parallel. This is especially beneficial with async permissions and DataLoader, as all database queries will be batched together into a single query.
+**Performance:** Checks run sequentially and stop at the first `true`. This is efficient when early checks are likely to succeed. For DataLoader batching, use `orParallel()` instead.
 
 ### `and(...permissions)`
 
-Combine permissions with AND logic (all must allow). Runs checks **sequentially** and stops at the first failure.
+Combine permissions with AND logic (all must allow). Runs checks **sequentially** and stops at the first failure (short-circuit).
 
 ```typescript
 const canPublish = and(isAuthenticated, isOwner, hasVerifiedEmail);
 ```
 
-**Performance:** Checks run sequentially and stop at the first `false`, which is optimal when you order cheap checks (like `isAuthenticated`) before expensive ones (like database queries).
+**Performance:** Checks run sequentially and stop at the first `false`. This is optimal when you order cheap checks (like `isAuthenticated`) before expensive ones (like database queries).
+
+### `orParallel(...permissions)`
+
+Combine permissions with OR logic, running all checks in **parallel** (no short-circuit).
+
+```typescript
+const canEdit = orParallel(isOwner, isAdmin, isModerator);
+```
+
+**Use case:** When using DataLoader or similar batching, all checks run simultaneously so database queries can be batched together. Even if the first check succeeds, all other checks still execute.
+
+### `andParallel(...permissions)`
+
+Combine permissions with AND logic, running all checks in **parallel** (no short-circuit).
+
+```typescript
+const canPublish = andParallel(isAuthenticated, isOwner, hasVerifiedEmail);
+```
+
+**Use case:** When using DataLoader or similar batching, all checks run simultaneously so database queries can be batched together. Even if the first check fails, all other checks still execute.
 
 ### `not(permission)`
 

@@ -1,5 +1,5 @@
 import { expectType, expectError, expectAssignable } from 'tsd';
-import { permission, or, and, not, type Permission, type ExplanationResult } from '..';
+import { permission, or, and, not, orParallel, andParallel, type Permission, type ExplanationResult } from '..';
 
 // Test types
 type Post = { authorId: string };
@@ -127,6 +127,38 @@ expectType<Permission<TestContext, undefined>>(notAdmin);
 // ✅ Resource permission
 const notOwner = not(isPostOwner);
 expectType<Permission<TestContext, Post>>(notOwner);
+
+// =============================================================================
+// orParallel() Operator Type Tests
+// =============================================================================
+
+// ✅ All context-only permissions -> returns Permission<Context, undefined>
+const orParallelContextOnly = orParallel(isAdmin, isUser);
+expectType<Permission<TestContext, undefined>>(orParallelContextOnly);
+
+// ✅ Mixed context-only and resource permissions -> returns Permission<Context, Resource>
+const orParallelMixed = orParallel(isAdmin, isPostOwner);
+expectType<Permission<TestContext, Post>>(orParallelMixed);
+
+// ✅ All same resource type -> returns Permission<Context, Resource>
+const orParallelSameResource = orParallel(isPostOwner, canEditPost);
+expectType<Permission<TestContext, Post>>(orParallelSameResource);
+
+// =============================================================================
+// andParallel() Operator Type Tests
+// =============================================================================
+
+// ✅ All context-only permissions -> returns Permission<Context, undefined>
+const andParallelContextOnly = andParallel(isAdmin, isUser);
+expectType<Permission<TestContext, undefined>>(andParallelContextOnly);
+
+// ✅ Mixed context-only and resource permissions -> returns Permission<Context, Resource>
+const andParallelMixed = andParallel(isAdmin, isPostOwner);
+expectType<Permission<TestContext, Post>>(andParallelMixed);
+
+// ✅ All same resource type -> returns Permission<Context, Resource>
+const andParallelSameResource = andParallel(isPostOwner, canEditPost);
+expectType<Permission<TestContext, Post>>(andParallelSameResource);
 
 // =============================================================================
 // explain() Method Type Tests
