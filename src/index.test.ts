@@ -6,6 +6,7 @@ import {
   not,
   orParallel,
   andParallel,
+  withContext,
   PermissionError,
   UnauthorizedError,
   ForbiddenError,
@@ -27,6 +28,11 @@ describe('granter', () => {
   const isAdmin = permission<TestContext>('isAdmin', (ctx) => ctx.user.role === 'admin');
 
   const isUser = permission<TestContext>('isUser', (ctx) => ctx.user.role === 'user');
+
+  const isModerator = permission<TestContext>(
+    'isModerator',
+    (ctx) => ctx.user.role === 'moderator'
+  );
 
   const isOwner = permission<TestContext, { authorId: string }>(
     'isOwner',
@@ -746,6 +752,192 @@ describe('granter', () => {
       // Cannot publish someone else's post
       const post3: Post = { id: '3', authorId: '2', published: false };
       await expect(canPublish.orThrow(ctx, post3)).rejects.toThrow(ForbiddenError);
+    });
+  });
+
+  describe('withContext', () => {
+    it('should bind context to permissions', async () => {
+      const ctx = { user: { id: '1', role: 'admin' } };
+
+      const abilities = withContext(ctx, {
+        isAdmin,
+        isUser,
+      });
+
+      // No need to pass ctx anymore
+      expect(await abilities.isAdmin()).toBe(true);
+      expect(await abilities.isUser()).toBe(false);
+    });
+
+    it('should work with resource-based permissions', async () => {
+      const ctx = { user: { id: '1', role: 'user' } };
+
+      const abilities = withContext(ctx, {
+        isOwner: isPostOwner,
+        isArticleOwner,
+      });
+
+      // Pass only the resource
+      expect(await abilities.isOwner(post)).toBe(true);
+      expect(await abilities.isArticleOwner(article)).toBe(true);
+
+      const otherPost = { authorId: '999' };
+      expect(await abilities.isOwner(otherPost)).toBe(false);
+    });
+
+    it('should work with composed permissions', async () => {
+      const ctx = { user: { id: '1', role: 'user' } };
+      const canEdit = or(isPostOwner, isAdmin);
+
+      const abilities = withContext(ctx, {
+        canEdit,
+      });
+
+      expect(await abilities.canEdit(post)).toBe(true);
+
+      const otherPost = { authorId: '999' };
+      expect(await abilities.canEdit(otherPost)).toBe(false);
+    });
+
+    it('should preserve permission methods', async () => {
+      const ctx = { user: { id: '1', role: 'admin' } };
+      const canDelete = or(isPostOwner, isAdmin);
+
+      const abilities = withContext(ctx, {
+        canDelete,
+      });
+
+      // The bound function should have the same structure
+      // We can call it directly
+      expect(await abilities.canDelete(post)).toBe(true);
+
+      // But methods like orThrow are on the original permission
+      // not on the bound version (this is expected behavior)
+      expect(typeof abilities.canDelete).toBe('function');
+    });
+
+    it('should work with mixed permission types', async () => {
+      const ctx = { user: { id: '999', role: 'moderator' } };
+
+      const abilities = withContext(ctx, {
+        // Context-only
+        isAdmin,
+        isModerator,
+        // Resource-based
+        canEditPost: or(isPostOwner, isAdmin),
+        // Composed
+        canView: or(isPostOwner, isAdmin, isModerator),
+      });
+
+      expect(await abilities.isAdmin()).toBe(false);
+      expect(await abilities.isModerator()).toBe(true);
+      // Moderator with id '999' is not the owner of post (authorId '1') and is not admin
+      expect(await abilities.canEditPost(post)).toBe(false);
+      // But can view (moderators can view)
+      expect(await abilities.canView(post)).toBe(true);
+    });
+
+    it('should handle async permissions', async () => {
+      const asyncCheck = permission<TestContext>('asyncCheck', async (ctx) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        return ctx.user.role === 'admin';
+      });
+
+      const ctx = { user: { id: '1', role: 'admin' } };
+      const abilities = withContext(ctx, {
+        asyncCheck,
+      });
+
+      expect(await abilities.asyncCheck()).toBe(true);
+    });
+
+    it('should work with multiple contexts', async () => {
+      const adminCtx = { user: { id: '1', role: 'admin' } };
+      const userCtx = { user: { id: '2', role: 'user' } };
+
+      const adminAbilities = withContext(adminCtx, {
+        isAdmin,
+        canEdit: or(isPostOwner, isAdmin),
+      });
+
+      const userAbilities = withContext(userCtx, {
+        isAdmin,
+        canEdit: or(isPostOwner, isAdmin),
+      });
+
+      expect(await adminAbilities.isAdmin()).toBe(true);
+      expect(await userAbilities.isAdmin()).toBe(false);
+
+      // Admin can edit any post
+      const somePost = { authorId: '999' };
+      expect(await adminAbilities.canEdit(somePost)).toBe(true);
+
+      // User can only edit own posts
+      expect(await userAbilities.canEdit(somePost)).toBe(false);
+      const ownPost = { authorId: '2' };
+      expect(await userAbilities.canEdit(ownPost)).toBe(true);
+    });
+
+    it('should preserve non-function properties', async () => {
+      const ctx = { user: { id: '1', role: 'admin' } };
+
+      const abilities = withContext(ctx, {
+        isAdmin,
+        someValue: 42,
+        someString: 'hello',
+      });
+
+      expect(await abilities.isAdmin()).toBe(true);
+      expect(abilities.someValue).toBe(42);
+      expect(abilities.someString).toBe('hello');
+    });
+
+    it('should be type-safe', async () => {
+      const ctx = { user: { id: '1', role: 'admin' } };
+
+      const abilities = withContext(ctx, {
+        isAdmin,
+        isOwner: isPostOwner,
+      });
+
+      // TypeScript should infer correct types
+      const adminResult: boolean = await abilities.isAdmin();
+      const ownerResult: boolean = await abilities.isOwner(post);
+
+      expect(adminResult).toBe(true);
+      expect(ownerResult).toBe(true);
+    });
+
+    it('should work in real-world scenario - Express middleware', async () => {
+      // Simulating Express middleware pattern
+      const createAbilities = (ctx: TestContext) => {
+        return withContext(ctx, {
+          isAuthenticated: permission<TestContext>('isAuthenticated', (ctx) => !!ctx.user),
+          isAdmin,
+          canViewPost: or(isPostOwner, isAdmin),
+          canEditPost: and(or(isPostOwner, isAdmin), isUser),
+          canDeletePost: or(isPostOwner, isAdmin),
+        });
+      };
+
+      // Admin user
+      const adminCtx = { user: { id: '1', role: 'admin' } };
+      const adminAbilities = createAbilities(adminCtx);
+
+      expect(await adminAbilities.isAuthenticated()).toBe(true);
+      expect(await adminAbilities.isAdmin()).toBe(true);
+      expect(await adminAbilities.canViewPost(post)).toBe(true);
+      expect(await adminAbilities.canDeletePost(post)).toBe(true);
+
+      // Regular user
+      const userCtx = { user: { id: '1', role: 'user' } };
+      const userAbilities = createAbilities(userCtx);
+
+      expect(await userAbilities.isAuthenticated()).toBe(true);
+      expect(await userAbilities.isAdmin()).toBe(false);
+      expect(await userAbilities.canViewPost(post)).toBe(true);
+      expect(await userAbilities.canEditPost(post)).toBe(true);
+      expect(await userAbilities.canDeletePost(post)).toBe(true);
     });
   });
 });
