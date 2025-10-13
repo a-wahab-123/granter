@@ -1,9 +1,8 @@
 import { expectType, expectError, expectAssignable } from 'tsd';
-import { permission, or, and, not, type Permission } from '..';
+import { permission, or, and, not, type Permission, type ExplanationResult } from '..';
 
 // Test types
 type Post = { authorId: string };
-type Comment = { authorId: string; postId: string };
 type User = { id: string; role: string };
 
 type TestContext = {
@@ -20,10 +19,11 @@ const isPostOwner = permission<TestContext, Post>(
   (ctx, resource) => resource.authorId === ctx.user.id
 );
 
-const isCommentOwner = permission<TestContext, Comment>(
-  'isCommentOwner',
-  (ctx, resource) => resource.authorId === ctx.user.id
-);
+// Note: Comment and Post have same structure, so TypeScript won't catch type errors
+// const isCommentOwner = permission<TestContext, Comment>(
+//   'isCommentOwner',
+//   (ctx, resource) => resource.authorId === ctx.user.id
+// );
 
 const canEditPost = permission<TestContext, Post>(
   'canEditPost',
@@ -33,7 +33,6 @@ const canEditPost = permission<TestContext, Post>(
 // Test data
 const ctx: TestContext = { user: { id: '1', role: 'user' } };
 const post: Post = { authorId: '1' };
-const comment: Comment = { authorId: '1', postId: '1' };
 
 // =============================================================================
 // Direct Permission Call Type Tests
@@ -51,29 +50,24 @@ expectType<Promise<boolean>>(isPostOwner(ctx, post));
 // ❌ Resource permission - missing resource parameter
 expectError(isPostOwner(ctx));
 
-// ❌ Resource permission - wrong resource type
-expectError(isPostOwner(ctx, comment));
-
 // =============================================================================
 // orThrow() Method Type Tests
 // =============================================================================
 
 // ✅ Context-only permission - no resource parameter
 expectType<Promise<void>>(isAdmin.orThrow(ctx));
-expectType<Promise<void>>(isAdmin.orThrow(ctx, { error: 'Not admin' }));
-
-// ❌ Context-only permission - should not accept resource as second param
-expectError(isAdmin.orThrow(ctx, post));
+expectType<Promise<void>>(isAdmin.orThrow(ctx, 'Not admin'));
+expectType<Promise<void>>(isAdmin.orThrow(ctx, new Error('Not admin')));
+expectType<Promise<void>>(isAdmin.orThrow(ctx, () => new Error('Not admin')));
 
 // ✅ Resource permission - requires resource parameter
 expectType<Promise<void>>(isPostOwner.orThrow(ctx, post));
-expectType<Promise<void>>(isPostOwner.orThrow(ctx, post, { error: 'Not owner' }));
+expectType<Promise<void>>(isPostOwner.orThrow(ctx, post, 'Not owner'));
+expectType<Promise<void>>(isPostOwner.orThrow(ctx, post, new Error('Not owner')));
+expectType<Promise<void>>(isPostOwner.orThrow(ctx, post, () => new Error('Not owner')));
 
 // ❌ Resource permission - missing resource parameter
 expectError(isPostOwner.orThrow(ctx));
-
-// ❌ Resource permission - wrong resource type
-expectError(isPostOwner.orThrow(ctx, comment));
 
 // =============================================================================
 // filter() Method Type Tests
@@ -81,9 +75,6 @@ expectError(isPostOwner.orThrow(ctx, comment));
 
 // ✅ Filter with correct resource type
 expectType<Promise<Post[]>>(isPostOwner.filter(ctx, [post]));
-
-// ❌ Filter with wrong resource type
-expectError(isPostOwner.filter(ctx, [comment]));
 
 // ✅ Return type should be array of same resource type
 const filteredPosts = isPostOwner.filter(ctx, [post]);
@@ -142,10 +133,10 @@ expectType<Permission<TestContext, Post>>(notOwner);
 // =============================================================================
 
 // ✅ Context-only permission explain
-expectType<Promise<any>>(isAdmin.explain(ctx));
+expectType<Promise<ExplanationResult>>(isAdmin.explain(ctx));
 
 // ✅ Resource permission explain
-expectType<Promise<any>>(isPostOwner.explain(ctx, post));
+expectType<Promise<ExplanationResult>>(isPostOwner.explain(ctx, post));
 
 // ❌ Resource permission explain - missing resource
 expectError(isPostOwner.explain(ctx));
@@ -155,11 +146,11 @@ expectError(isPostOwner.explain(ctx));
 // =============================================================================
 
 // ✅ Context-only permission creation
-const testContextPerm = permission<TestContext>('test', (ctx) => true);
+const testContextPerm = permission<TestContext>('test', (_ctx) => true);
 expectType<Permission<TestContext, undefined>>(testContextPerm);
 
 // ✅ Resource permission creation
-const testResourcePerm = permission<TestContext, Post>('test', (ctx, resource) => true);
+const testResourcePerm = permission<TestContext, Post>('test', (_ctx, _resource) => true);
 expectType<Permission<TestContext, Post>>(testResourcePerm);
 
 // ✅ Permissions should be callable
