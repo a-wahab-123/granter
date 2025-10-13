@@ -10,7 +10,7 @@
 ✨ **Composable** - Build complex permissions from simple rules  
 🔒 **Type-safe** - Full TypeScript inference with generic contexts  
 ⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader  
-🎯 **Simple API** - Just `can()`, `authorize()`, and `filter()`  
+🎯 **Simple API** - Callable permissions with methods  
 🔧 **Framework-agnostic** - Works everywhere  
 🪶 **Zero dependencies**
 
@@ -47,7 +47,7 @@
 ## Quick Start
 
 ```typescript
-import { permission, or, and, can, authorize, filter } from 'granter';
+import { permission, or, and } from 'granter';
 
 // 1. Define your types
 type AppContext = {
@@ -76,27 +76,40 @@ const isPostOwner = permission('isPostOwner', async (ctx: AppContext, post: Post
 // 3. Compose permissions
 const canEditPost = or(isPostOwner, isAdmin);
 
-// 4. Use permissions
+// 4. Use permissions - Permissions are callable!
 const ctx: AppContext = { user: { id: '1', role: 'user' }, db };
 
-// Without resource
-if (await can(ctx, isAuthenticated)) {
+// Direct call - returns boolean
+if (await isAuthenticated(ctx)) {
   console.log('User is logged in');
 }
 
 // With resource
 const post = await db.getPost('123');
-if (await can(ctx, canEditPost, post)) {
+if (await canEditPost(ctx, post)) {
   await db.updatePost(post);
 }
 
 // Require permission (throws if denied)
-await authorize(ctx, isAuthenticated);
-await authorize(ctx, canEditPost, post);
+await canEditPost.orThrow(ctx, post);
+await canEditPost.orThrow(ctx, post, 'You cannot edit this post');
 
 // Filter array of resources
 const allPosts = await db.getPosts();
-const editablePosts = await filter(ctx, canEditPost, allPosts);
+const editablePosts = await canEditPost.filter(ctx, allPosts);
+
+// Debug why permission was denied
+const explanation = await canEditPost.explain(ctx, post);
+console.log(explanation);
+// {
+//   name: "(isPostOwner OR isAdmin)",
+//   value: false,
+//   duration: 15.23,
+//   children: [
+//     { name: "isPostOwner", value: false, duration: 8.12 },
+//     { name: "isAdmin", value: false, duration: 7.11 }
+//   ]
+// }
 ```
 
 ## Installation
@@ -131,7 +144,7 @@ const session = await getSession(); // Clerk, Auth.js, Passport, custom, etc.
 
 // ✅ granter handles authorization
 const ctx = { user: session.user, db };
-await authorize(ctx, canDeletePost, post);
+await canDeletePost.orThrow(ctx, post);
 ```
 
 This separation means granter works with **any** authentication system - no lock-in, full flexibility.
@@ -204,76 +217,75 @@ const mixed = or(isPostOwner, isCommentOwner); // TypeScript error!
 
 **Performance:** `or()` runs all checks in parallel for better performance with async permissions. This is especially powerful with DataLoader, as all database queries will be batched together! `and()` runs sequentially and stops at the first failure, which is optimal when you have expensive checks ordered after cheap ones.
 
-### Checking Permissions
+### Using Permissions
 
-Three ways to check permissions:
+Permissions are callable functions with methods:
 
 ```typescript
-// 1. can() - Returns boolean
-if (await can(ctx, canEdit, post)) {
+// 1. Direct call - Returns boolean
+if (await canEdit(ctx, post)) {
   await updatePost(post);
 }
 
-// 2. authorize() - Throws if denied
-await authorize(ctx, canDelete, post);
+// 2. orThrow() - Throws if denied
+await canDelete.orThrow(ctx, post);
 await deletePost(post);
+
+// With custom error message
+await canEdit.orThrow(ctx, post, 'You cannot edit this post');
 
 // 3. filter() - Filter array to allowed items
 const allPosts = await getPosts();
-const editablePosts = await filter(ctx, canEdit, allPosts);
+const editablePosts = await canEdit.filter(ctx, allPosts);
+
+// 4. explain() - Debug permission checks
+const explanation = await canEdit.explain(ctx, post);
+console.log(explanation);
+// Shows which permissions passed/failed and timing
 ```
 
-### Context Binding
+### Permission Methods
 
-Use `withContext()` to avoid passing context repeatedly:
+Every permission has these methods:
 
-```typescript
-// Without binding - repetitive
-if (await can(ctx, canRead, post)) {
-}
-await authorize(ctx, canEdit, post);
-const editable = await filter(ctx, canDelete, posts);
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `permission(ctx, resource)` | `Promise<boolean>` | Direct call - checks if allowed |
+| `.orThrow(ctx, resource, error?)` | `Promise<void>` | Throws `ForbiddenError` if denied |
+| `.filter(ctx, resources)` | `Promise<T[]>` | Filter array to allowed items |
+| `.explain(ctx, resource)` | `Promise<ExplanationResult>` | Debug why permission passed/failed |
 
-// With binding - cleaner
-const { can, authorize, filter } = withContext(ctx);
-if (await can(canRead, post)) {
-}
-await authorize(canEdit, post);
-const editable = await filter(canDelete, posts);
-```
+### Simplifying with Closures
 
-### Enhanced Context with Abilities
-
-Use `withAbility()` to create an enhanced context with permission methods attached. Since it spreads the original context, you can destructure both context properties and permission methods:
+If you're checking many permissions with the same context, create your own closure:
 
 ```typescript
-// Returns context + permission methods
-const enhancedCtx = withAbility(ctx);
-// enhancedCtx = { ...ctx, can, authorize, filter }
+// Create a closure that captures context
+const createAbilities = (ctx: AppContext) => ({
+  canEdit: (post: Post) => canEdit(ctx, post),
+  canEditOrThrow: (post: Post) => canEdit.orThrow(ctx, post),
+  canDelete: (post: Post) => canDelete(ctx, post),
+  canDeleteOrThrow: (post: Post) => canDelete.orThrow(ctx, post),
+});
 
-// Destructure what you need - context properties AND permission methods
-const { user, db, authorize, filter } = enhancedCtx;
+// Use it
+const abilities = createAbilities(ctx);
+if (await abilities.canEdit(post)) {
+  await abilities.canEditOrThrow(post);
+}
 
-console.log(user.id); // Original context property
-await authorize(canEdit, post); // Permission method
-const filtered = await filter(canRead, posts);
-
-// Perfect for middleware - enhance the context itself
+// Or store in middleware
 // Express
 app.use((req, res, next) => {
-  req.ability = withAbility(getContext(req));
+  req.abilities = createAbilities(getContext(req));
   next();
 });
 
-// Then use: const { authorize, user } = req.ability;
-
-// Hono
-app.use('*', async (c, next) => {
-  c.set('ctx', withAbility(getBaseContext(c)));
-  await next();
-});
-
-// Then use: const { authorize, user } = c.get('ctx');
+// Then use
+const { canEdit, canEditOrThrow } = req.abilities;
+if (await canEdit(post)) {
+  await canEditOrThrow(post);
+}
 ```
 
 ## Examples
@@ -282,7 +294,7 @@ app.use('*', async (c, next) => {
 
 ```typescript
 import express from 'express';
-import { withAbility, permission, or, UnauthorizedError, ForbiddenError } from 'granter';
+import { permission, or, UnauthorizedError, ForbiddenError } from 'granter';
 
 const app = express();
 
@@ -302,23 +314,23 @@ app.use((req, res, next) => {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  req.ability = withAbility({
+  req.ctx = {
     user: req.user, // From auth middleware
     db: prisma,
-  });
+  };
   next();
 });
 
 // Step 3: Use authorization in routes
 app.delete('/posts/:id', async (req, res) => {
   try {
-    const { authorize, db } = req.ability;
-    const post = await db.post.findUnique({
+    const ctx = req.ctx;
+    const post = await ctx.db.post.findUnique({
       where: { id: req.params.id },
     });
 
-    await authorize(canDeletePost, post);
-    await db.post.delete({ where: { id: req.params.id } });
+    await canDeletePost.orThrow(ctx, post);
+    await ctx.db.post.delete({ where: { id: req.params.id } });
 
     res.json({ success: true });
   } catch (error) {
@@ -329,12 +341,12 @@ app.delete('/posts/:id', async (req, res) => {
   }
 });
 
-// Destructure both context and permission methods
+// Using filter method
 app.get('/posts/editable', async (req, res) => {
-  const { filter, user, db } = req.ability;
-  const allPosts = await db.post.findMany();
-  const editablePosts = await filter(canEditPost, allPosts);
-  res.json({ userId: user.id, posts: editablePosts });
+  const ctx = req.ctx;
+  const allPosts = await ctx.db.post.findMany();
+  const editablePosts = await canEditPost.filter(ctx, allPosts);
+  res.json({ userId: ctx.user.id, posts: editablePosts });
 });
 ```
 
@@ -342,14 +354,14 @@ app.get('/posts/editable', async (req, res) => {
 
 ```typescript
 import { Hono } from 'hono';
-import { withAbility, withContext, UnauthorizedError, ForbiddenError } from 'granter';
+import { permission, or, UnauthorizedError, ForbiddenError } from 'granter';
 
 const app = new Hono();
 
 // Step 1: Authentication (use any auth middleware)
 app.use('*', authenticateUser); // Sets c.set('user', authenticatedUser)
 
-// Step 2: Create granter context with abilities
+// Step 2: Create granter context
 app.use('*', async (c, next) => {
   const user = c.get('user');
 
@@ -357,25 +369,21 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'Not authenticated' }, 401);
   }
 
-  // withAbility returns { ...baseCtx, can, authorize, filter }
-  c.set(
-    'ctx',
-    withAbility({
-      user,
-      db: prisma,
-      loaders: c.get('loaders'), // Optional: DataLoader for batching
-    })
-  );
+  c.set('ctx', {
+    user,
+    db: prisma,
+    loaders: c.get('loaders'), // Optional: DataLoader for batching
+  });
   await next();
 });
 
-// Destructure permission methods directly from enhanced context
+// Use permissions directly
 app.delete('/posts/:id', async (c) => {
   try {
-    const { authorize } = c.get('ctx');
+    const ctx = c.get('ctx');
     const post = await getPost(c.req.param('id'));
 
-    await authorize(canDelete, post);
+    await canDelete.orThrow(ctx, post);
     await deletePost(post);
 
     return c.json({ success: true });
@@ -390,32 +398,14 @@ app.delete('/posts/:id', async (c) => {
   }
 });
 
-// Destructure both context properties and permission methods
+// Using filter method
 app.get('/posts/my', async (c) => {
-  const { user, filter } = c.get('ctx');
+  const ctx = c.get('ctx');
 
   const allPosts = await getPosts();
-  const myPosts = await filter(canEdit, allPosts);
+  const myPosts = await canEdit.filter(ctx, allPosts);
 
-  return c.json({ userId: user.id, posts: myPosts });
-});
-
-// Alternative: Using withContext - just permissions
-app.put('/posts/:id', async (c) => {
-  try {
-    const baseCtx = { user: c.get('user'), loaders: c.get('loaders') };
-    const { authorize } = withContext(baseCtx);
-
-    const post = await getPost(c.req.param('id'));
-    await authorize(canEdit, post);
-
-    return c.json(await updatePost(post));
-  } catch (error) {
-    if (error instanceof ForbiddenError) {
-      return c.json({ error: error.message }, 403);
-    }
-    throw error;
-  }
+  return c.json({ userId: ctx.user.id, posts: myPosts });
 });
 ```
 
@@ -424,7 +414,7 @@ app.put('/posts/:id', async (c) => {
 ```typescript
 import { ApolloServer } from '@apollo/server';
 import DataLoader from 'dataloader';
-import { permission, or, can, withContext } from 'granter';
+import { permission, or } from 'granter';
 
 type AppContext = {
   user: User;

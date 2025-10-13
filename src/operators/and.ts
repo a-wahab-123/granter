@@ -1,7 +1,6 @@
-import type { Permission, FirstNonUndefined, ExplanationResult } from '../types';
-import { permission } from '../utils/permission';
-import { checkWithExplain } from '../utils/explain';
-import { now } from '../utils/performance';
+import type { FirstNonUndefined } from '../types';
+import { type Permission } from '../utils/permission';
+import { operatorPermission } from '../utils/operatorPermission';
 
 /**
  * Combine permissions with AND logic
@@ -79,37 +78,18 @@ export function and<
 export function and<TContext, TResource>(
   ...permissions: Permission<TContext, TResource>[]
 ): Permission<TContext, TResource> {
-  return permission<TContext, TResource>(
-    `(${permissions.map((p) => p.name).join(' AND ')})`,
-    async (ctx, resource, onExplain) => {
-      const start = now();
-      const checks: Array<{ result: boolean; detail: ExplanationResult }> = [];
-
+  return operatorPermission<TContext, TResource>(
+    'AND',
+    permissions,
+    async (ctx: TContext, resource: TResource) => {
       // Check permissions sequentially with short-circuit
       for (const p of permissions) {
-        const check = await checkWithExplain(p, ctx, resource, onExplain);
-        checks.push(check);
-
-        if (!check.result) {
-          break; // Short-circuit on first failure
+        const result = await p(ctx, resource);
+        if (!result) {
+          return false;
         }
       }
-
-      const finalResult = checks.every((check) => check.result);
-
-      // Call explain callback once for this AND operation
-      if (onExplain) {
-        const duration = now() - start;
-        onExplain({
-          name: `(${permissions.map((p) => p.name).join(' AND ')})`,
-          result: finalResult,
-          duration: Math.round(duration * 100) / 100,
-          operator: 'AND',
-          details: checks.map((check) => check.detail),
-        });
-      }
-
-      return finalResult;
+      return true;
     }
   );
 }

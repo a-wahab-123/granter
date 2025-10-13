@@ -4,11 +4,6 @@ import {
   or,
   and,
   not,
-  can,
-  authorize,
-  filter,
-  withContext,
-  withAbility,
   PermissionError,
   UnauthorizedError,
   ForbiddenError,
@@ -47,26 +42,28 @@ describe('granter', () => {
   );
 
   describe('permission', () => {
-    it('should create a permission', () => {
-      expect(isAdmin.name).toBe('isAdmin');
-      expect(typeof isAdmin.check).toBe('function');
+    it('should create a callable permission with methods', () => {
+      expect(typeof isAdmin).toBe('function');
+      expect(typeof isAdmin.orThrow).toBe('function');
+      expect(typeof isAdmin.filter).toBe('function');
+      expect(typeof isAdmin.explain).toBe('function');
     });
   });
 
-  describe('can', () => {
+  describe('direct permission calls', () => {
     it('should return true when permission allows', async () => {
       const ctx = { user: { id: '1', role: 'admin' } };
-      expect(await can(ctx, isAdmin)).toBe(true);
+      expect(await isAdmin(ctx)).toBe(true);
     });
 
     it('should return false when permission denies', async () => {
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, isAdmin)).toBe(false);
+      expect(await isAdmin(ctx)).toBe(false);
     });
 
     it('should work with resources', async () => {
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, isOwner, post)).toBe(true);
+      expect(await isOwner(ctx, post)).toBe(true);
     });
   });
 
@@ -74,32 +71,32 @@ describe('granter', () => {
     it('should allow if any permission allows', async () => {
       const canAccess = or(isAdmin);
       const ctx = { user: { id: '1', role: 'admin' } };
-      expect(await can(ctx, canAccess)).toBe(true);
+      expect(await canAccess(ctx)).toBe(true);
     });
 
     it('should allow if any permission allows', async () => {
       const canAccess = or(isOwner);
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, canAccess, post)).toBe(true);
+      expect(await canAccess(ctx, post)).toBe(true);
     });
 
     it('should allow if any permission allows', async () => {
       const canAccess = or(isAdmin, isUser);
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, canAccess)).toBe(true);
+      expect(await canAccess(ctx)).toBe(true);
     });
 
     it('should deny if all permissions deny', async () => {
       const isGuest = permission<TestContext>('isGuest', (ctx) => ctx.user.role === 'guest');
       const canAccess = or(isAdmin, isGuest);
       const ctx = { user: { id: '1', role: 'other' } };
-      expect(await can(ctx, canAccess)).toBe(false);
+      expect(await canAccess(ctx)).toBe(false);
     });
 
     it('should work with multiple permissions', async () => {
       const canAccess = or(isAdmin, isUser, isPostOwner, isArticleOwner);
       const ctx = { user };
-      expect(await can(ctx, canAccess, post)).toBe(true);
+      expect(await canAccess(ctx, post)).toBe(true);
     });
 
     it('should run all checks in parallel', async () => {
@@ -127,7 +124,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
 
       const start = Date.now();
-      await can(ctx, combined);
+      await combined(ctx);
       const duration = Date.now() - start;
 
       // Should complete in ~30ms (parallel) not ~60ms (sequential)
@@ -162,7 +159,7 @@ describe('granter', () => {
       const combined = or(perm1, perm2, perm3);
       const ctx = { user: { id: '1', role: 'user' } };
 
-      const result = await can(ctx, combined);
+      const result = await combined(ctx);
 
       expect(result).toBe(true);
       // All three checks should run in parallel (same batch)
@@ -175,13 +172,13 @@ describe('granter', () => {
       const isAuthenticated = permission<TestContext>('isAuthenticated', (ctx) => !!ctx.user);
       const both = and(isAuthenticated, isUser);
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, both)).toBe(true);
+      expect(await both(ctx)).toBe(true);
     });
 
     it('should deny if any permission denies', async () => {
       const both = and(isAdmin, isUser);
       const ctx = { user: { id: '1', role: 'admin' } };
-      expect(await can(ctx, both)).toBe(false);
+      expect(await both(ctx)).toBe(false);
     });
   });
 
@@ -189,7 +186,7 @@ describe('granter', () => {
     it('should invert permission result', async () => {
       const isNotAdmin = not(isAdmin);
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, isNotAdmin)).toBe(true);
+      expect(await isNotAdmin(ctx)).toBe(true);
     });
 
     it('should work in compositions', async () => {
@@ -197,25 +194,25 @@ describe('granter', () => {
       const adminCtx = { user: { id: '1', role: 'admin' } };
       const userCtx = { user: { id: '2', role: 'user' } };
 
-      expect(await can(adminCtx, canComment)).toBe(false);
-      expect(await can(userCtx, canComment)).toBe(true);
+      expect(await canComment(adminCtx)).toBe(false);
+      expect(await canComment(userCtx)).toBe(true);
     });
   });
 
-  describe('authorize', () => {
+  describe('orThrow', () => {
     it('should not throw when permission allows', async () => {
       const ctx = { user: { id: '1', role: 'admin' } };
-      await expect(authorize(ctx, isAdmin)).resolves.toBeUndefined();
+      await expect(isAdmin.orThrow(ctx)).resolves.toBeUndefined();
     });
 
     it('should throw ForbiddenError when permission denies', async () => {
       const ctx = { user: { id: '1', role: 'user' } };
-      await expect(authorize(ctx, isAdmin)).rejects.toThrow(ForbiddenError);
+      await expect(isAdmin.orThrow(ctx)).rejects.toThrow(ForbiddenError);
     });
 
     it('should include permission name in error', async () => {
       const ctx = { user: { id: '1', role: 'user' } };
-      await expect(authorize(ctx, isAdmin)).rejects.toThrow('isAdmin');
+      await expect(isAdmin.orThrow(ctx)).rejects.toThrow('isAdmin');
     });
   });
 
@@ -224,7 +221,7 @@ describe('granter', () => {
       const posts = [{ authorId: '1' }, { authorId: '2' }, { authorId: '1' }];
 
       const ctx = { user: { id: '1', role: 'user' } };
-      const owned = await filter(ctx, isOwner, posts);
+      const owned = await isOwner.filter(ctx, posts);
 
       expect(owned).toHaveLength(2);
       expect(owned.every((p) => p.authorId === '1')).toBe(true);
@@ -233,155 +230,12 @@ describe('granter', () => {
     it('should return empty array if no items allowed', async () => {
       const posts = [{ authorId: '2' }, { authorId: '3' }];
       const ctx = { user: { id: '1', role: 'user' } };
-      const owned = await filter(ctx, isOwner, posts);
+      const owned = await isOwner.filter(ctx, posts);
 
       expect(owned).toHaveLength(0);
     });
   });
 
-  describe('withContext', () => {
-    // Changed from 'createChecker'
-    it('should create bound permissions', async () => {
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const bound = withContext(ctx); // Changed
-
-      expect(await bound.can(isAdmin)).toBe(true);
-    });
-
-    it('should work with resources', async () => {
-      const ctx = { user: { id: '1', role: 'user' } };
-      const bound = withContext(ctx); // Changed
-      const post = { authorId: '1' };
-
-      expect(await bound.can(isOwner, post)).toBe(true);
-    });
-
-    it('should authorize correctly', async () => {
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const bound = withContext(ctx); // Changed
-
-      await expect(bound.authorize(isAdmin)).resolves.toBeUndefined();
-    });
-
-    it('should filter correctly', async () => {
-      const ctx = { user: { id: '1', role: 'user' } };
-      const bound = withContext(ctx); // Changed
-      const posts = [{ authorId: '1' }, { authorId: '2' }];
-
-      const owned = await bound.filter(isOwner, posts);
-      expect(owned).toHaveLength(1);
-    });
-  });
-
-  describe('withAbility', () => {
-    it('should create enhanced context with permission methods', async () => {
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const enhanced = withAbility(ctx);
-
-      // Should have permission methods
-      expect(typeof enhanced.can).toBe('function');
-      expect(typeof enhanced.authorize).toBe('function');
-      expect(typeof enhanced.filter).toBe('function');
-
-      // Should have original context properties
-      expect(enhanced.user).toBe(ctx.user);
-    });
-
-    it('should work with can method', async () => {
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const enhanced = withAbility(ctx);
-
-      expect(await enhanced.can(isAdmin)).toBe(true);
-      expect(await enhanced.can(isUser)).toBe(false);
-    });
-
-    it('should work with resources', async () => {
-      const ctx = { user: { id: '1', role: 'user' } };
-      const enhanced = withAbility(ctx);
-      const post = { authorId: '1' };
-
-      expect(await enhanced.can(isOwner, post)).toBe(true);
-    });
-
-    it('should authorize correctly', async () => {
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const enhanced = withAbility(ctx);
-
-      await expect(enhanced.authorize(isAdmin)).resolves.toBeUndefined();
-    });
-
-    it('should throw on unauthorized', async () => {
-      const ctx = { user: { id: '1', role: 'user' } };
-      const enhanced = withAbility(ctx);
-
-      await expect(enhanced.authorize(isAdmin)).rejects.toThrow(ForbiddenError);
-    });
-
-    it('should filter correctly', async () => {
-      const ctx = { user: { id: '1', role: 'user' } };
-      const enhanced = withAbility(ctx);
-      const posts = [{ authorId: '1' }, { authorId: '2' }, { authorId: '1' }];
-
-      const owned = await enhanced.filter(isOwner, posts);
-      expect(owned).toHaveLength(2);
-      expect(owned.every((p) => p.authorId === '1')).toBe(true);
-    });
-
-    it('should allow destructuring context properties and methods', async () => {
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const enhanced = withAbility(ctx);
-
-      // Destructure both original context and permission methods
-      const { user, can: canCheck, authorize: auth } = enhanced;
-
-      expect(user).toBe(ctx.user);
-      expect(typeof canCheck).toBe('function');
-      expect(typeof auth).toBe('function');
-
-      expect(await canCheck(isAdmin)).toBe(true);
-    });
-
-    it('should preserve all context properties', () => {
-      type ExtendedContext = {
-        user: { id: string; role: string };
-        db: { connection: string };
-        loaders: { post: string };
-        settings: { theme: string };
-      };
-
-      const ctx: ExtendedContext = {
-        user: { id: '1', role: 'admin' },
-        db: { connection: 'postgres' },
-        loaders: { post: 'loader' },
-        settings: { theme: 'dark' },
-      };
-
-      const enhanced = withAbility(ctx);
-
-      // All original properties should be preserved
-      expect(enhanced.user).toBe(ctx.user);
-      expect(enhanced.db).toBe(ctx.db);
-      expect(enhanced.loaders).toBe(ctx.loaders);
-      expect(enhanced.settings).toBe(ctx.settings);
-
-      // Plus permission methods
-      expect(typeof enhanced.can).toBe('function');
-      expect(typeof enhanced.authorize).toBe('function');
-      expect(typeof enhanced.filter).toBe('function');
-    });
-
-    it('should work in middleware pattern', async () => {
-      // Simulating Express/Hono middleware pattern
-      const ctx = { user: { id: '1', role: 'admin' } };
-      const enhanced = withAbility(ctx);
-
-      // Destructure in route handler
-      const { user, authorize } = enhanced;
-
-      expect(user.id).toBe('1');
-      await expect(authorize(isAdmin)).resolves.toBeUndefined();
-    });
-  });
 
   describe('errors', () => {
     it('should create PermissionError', () => {
@@ -425,7 +279,7 @@ describe('granter', () => {
       });
 
       const ctx = { user: { id: '1', role: 'admin' } };
-      expect(await can(ctx, asyncPerm)).toBe(true);
+      expect(await asyncPerm(ctx)).toBe(true);
     });
 
     it('should work in compositions with async permissions', async () => {
@@ -436,7 +290,7 @@ describe('granter', () => {
 
       const combined = or(asyncPerm, isUser);
       const ctx = { user: { id: '1', role: 'user' } };
-      expect(await can(ctx, combined)).toBe(true);
+      expect(await combined(ctx)).toBe(true);
     });
   });
 
@@ -459,7 +313,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
       const post = { authorId: '1' };
 
-      expect(await can(ctx, canEdit, post)).toBe(true);
+      expect(await canEdit(ctx, post)).toBe(true);
     });
 
     it('should work when resource-less comes after', async () => {
@@ -467,7 +321,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'moderator' } };
       const post = { authorId: '1' };
 
-      expect(await can(ctx, canEdit, post)).toBe(true);
+      expect(await canEdit(ctx, post)).toBe(true);
     });
 
     it('should allow mixing in or()', async () => {
@@ -478,14 +332,14 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
       const post = { authorId: '1' };
 
-      expect(await can(ctx, canDelete, post)).toBe(true);
+      expect(await canDelete(ctx, post)).toBe(true);
     });
 
     it('should work with multiple resource-less permissions', async () => {
       const hasAccess = and(isAuthenticated, isModerator);
       const ctx = { user: { id: '1', role: 'moderator' } };
 
-      expect(await can(ctx, hasAccess)).toBe(true);
+        expect(await hasAccess(ctx)).toBe(true);
     });
 
     it('should fail when resource-specific permission fails', async () => {
@@ -493,7 +347,7 @@ describe('granter', () => {
       const ctx = { user: { id: '1', role: 'user' } };
       const post = { authorId: '2' };
 
-      expect(await can(ctx, canEdit, post)).toBe(false);
+      expect(await canEdit(ctx, post)).toBe(false);
     });
   });
 
@@ -512,8 +366,8 @@ describe('granter', () => {
 
         const ctx = { user: { id: '1', role: 'user', banned: true } as any };
 
-        expect(await can(ctx, isBannedAndUser)).toBe(true);
-        expect(await can(ctx, isNotBannedAndUser)).toBe(false);
+        expect(await isBannedAndUser(ctx)).toBe(true);
+        expect(await isNotBannedAndUser(ctx)).toBe(false);
       });
 
       it("should implement De Morgan's law: not(A and B) === not(A) or not(B)", async () => {
@@ -522,18 +376,18 @@ describe('granter', () => {
 
         // Test case 1: admin and banned
         const ctx1 = { user: { id: '1', role: 'admin', banned: true } as any };
-        expect(await can(ctx1, notBoth)).toBe(false);
-        expect(await can(ctx1, neitherOr)).toBe(false);
+        expect(await notBoth(ctx1)).toBe(false);
+        expect(await neitherOr(ctx1)).toBe(false);
 
         // Test case 2: admin and not banned
         const ctx2 = { user: { id: '2', role: 'admin', banned: false } as any };
-        expect(await can(ctx2, notBoth)).toBe(true);
-        expect(await can(ctx2, neitherOr)).toBe(true);
+        expect(await notBoth(ctx2)).toBe(true);
+        expect(await neitherOr(ctx2)).toBe(true);
 
         // Test case 3: not admin and banned
         const ctx3 = { user: { id: '3', role: 'user', banned: true } as any };
-        expect(await can(ctx3, notBoth)).toBe(true);
-        expect(await can(ctx3, neitherOr)).toBe(true);
+        expect(await notBoth(ctx3)).toBe(true);
+        expect(await neitherOr(ctx3)).toBe(true);
       });
     });
 
@@ -543,10 +397,10 @@ describe('granter', () => {
         const isNeitherAdminNorBanned = not(isAdminOrBanned);
 
         const ctx1 = { user: { id: '1', role: 'user', banned: false } as any };
-        expect(await can(ctx1, isNeitherAdminNorBanned)).toBe(true);
+        expect(await isNeitherAdminNorBanned(ctx1)).toBe(true);
 
         const ctx2 = { user: { id: '2', role: 'admin', banned: false } as any };
-        expect(await can(ctx2, isNeitherAdminNorBanned)).toBe(false);
+        expect(await isNeitherAdminNorBanned(ctx2)).toBe(false);
       });
     });
 
@@ -557,32 +411,32 @@ describe('granter', () => {
 
         // Admin can comment
         const ctx1 = { user: { id: '1', role: 'admin', banned: false } as any };
-        expect(await can(ctx1, canComment)).toBe(true);
+        expect(await canComment(ctx1)).toBe(true);
 
         // User (not banned) can comment
         const ctx2 = { user: { id: '2', role: 'user', banned: false } as any };
-        expect(await can(ctx2, canComment)).toBe(true);
+        expect(await canComment(ctx2)).toBe(true);
 
         // Banned user cannot comment
         const ctx3 = { user: { id: '3', role: 'user', banned: true } as any };
-        expect(await can(ctx3, canComment)).toBe(false);
+        expect(await canComment(ctx3)).toBe(false);
       });
 
       it('should handle not() wrapping complex compositions', async () => {
         const cannotModerate = not(and(isAuthenticated, or(isAdmin, isUser)));
 
         const ctx = { user: { id: '1', role: 'admin' } };
-        expect(await can(ctx, cannotModerate)).toBe(false);
+        expect(await cannotModerate(ctx)).toBe(false);
       });
 
       it('should work with triple nesting', async () => {
         const permission1 = or(and(isAdmin, not(isBanned)), and(isUser, not(isBanned)));
 
         const ctx1 = { user: { id: '1', role: 'admin', banned: false } as any };
-        expect(await can(ctx1, permission1)).toBe(true);
+        expect(await permission1(ctx1)).toBe(true);
 
         const ctx2 = { user: { id: '2', role: 'user', banned: true } as any };
-        expect(await can(ctx2, permission1)).toBe(false);
+        expect(await permission1(ctx2)).toBe(false);
       });
     });
 
@@ -593,9 +447,9 @@ describe('granter', () => {
 
         const ctx = { user: { id: '1', role: 'admin' } };
 
-        expect(await can(ctx, isAdmin)).toBe(true);
-        expect(await can(ctx, notAdmin)).toBe(false);
-        expect(await can(ctx, notNotAdmin)).toBe(true);
+        expect(await isAdmin(ctx)).toBe(true);
+        expect(await notAdmin(ctx)).toBe(false);
+        expect(await notNotAdmin(ctx)).toBe(true);
       });
     });
   });
@@ -627,7 +481,7 @@ describe('granter', () => {
         archivedBy: 'user1',
       };
 
-      expect(await can(ctx, canView, historicalPost)).toBe(true);
+      expect(await canView(ctx, historicalPost)).toBe(true);
     });
 
     it('should handle missing properties gracefully with optional chaining', async () => {
@@ -642,7 +496,7 @@ describe('granter', () => {
       };
 
       // Should work because isPostOwner succeeds
-      expect(await can(ctx, canView, regularPost as any)).toBe(true);
+      expect(await canView(ctx, regularPost as any)).toBe(true);
     });
 
     it('should work in and() with inherited types', async () => {
@@ -657,7 +511,7 @@ describe('granter', () => {
         archivedBy: 'user1',
       };
 
-      expect(await can(ctx, canEdit, historicalPost)).toBe(true);
+      expect(await canEdit(ctx, historicalPost)).toBe(true);
     });
   });
 
@@ -689,15 +543,15 @@ describe('granter', () => {
       // Owner can edit unlocked post
       const ctx1 = { user: { id: '1', role: 'user' } };
       const post1: Post = { id: '1', authorId: '1', published: true, locked: false };
-      expect(await can(ctx1, canEdit, post1)).toBe(true);
+      expect(await canEdit(ctx1, post1)).toBe(true);
 
       // Owner cannot edit locked post
       const post2: Post = { id: '2', authorId: '1', published: true, locked: true };
-      expect(await can(ctx1, canEdit, post2)).toBe(false);
+      expect(await canEdit(ctx1, post2)).toBe(false);
 
       // Admin can edit locked post
       const ctx2 = { user: { id: '2', role: 'admin' } };
-      expect(await can(ctx2, canEdit, post2)).toBe(true);
+      expect(await canEdit(ctx2, post2)).toBe(true);
     });
 
     it('should handle: can view if published OR (authenticated AND owner)', async () => {
@@ -706,15 +560,15 @@ describe('granter', () => {
       // Anyone can view published post
       const ctx1 = { user: { id: '1', role: 'user' } };
       const post1: Post = { id: '1', authorId: '2', published: true };
-      expect(await can(ctx1, canView, post1)).toBe(true);
+      expect(await canView(ctx1, post1)).toBe(true);
 
       // Owner can view unpublished post
       const post2: Post = { id: '2', authorId: '1', published: false };
-      expect(await can(ctx1, canView, post2)).toBe(true);
+      expect(await canView(ctx1, post2)).toBe(true);
 
       // Non-owner cannot view unpublished post
       const post3: Post = { id: '3', authorId: '2', published: false };
-      expect(await can(ctx1, canView, post3)).toBe(false);
+      expect(await canView(ctx1, post3)).toBe(false);
     });
 
     it('should work with filter for complex permissions', async () => {
@@ -728,27 +582,27 @@ describe('granter', () => {
         { id: '4', authorId: '3', published: true },
       ];
 
-      const editable = await filter(ctx, canEdit, posts);
+      const editable = await canEdit.filter(ctx, posts);
       expect(editable).toHaveLength(2);
       expect(editable.map((p) => p.id)).toEqual(['1', '3']);
     });
 
-    it('should work with authorize for complex permissions', async () => {
+    it('should work with orThrow for complex permissions', async () => {
       const canPublish = and(isPostOwner, isAuthenticated, not(isPublished));
 
       const ctx = { user: { id: '1', role: 'user' } };
 
       // Can publish unpublished owned post
       const post1: Post = { id: '1', authorId: '1', published: false };
-      await expect(authorize(ctx, canPublish, post1)).resolves.toBeUndefined();
+      await expect(canPublish.orThrow(ctx, post1)).resolves.toBeUndefined();
 
       // Cannot publish already published post
       const post2: Post = { id: '2', authorId: '1', published: true };
-      await expect(authorize(ctx, canPublish, post2)).rejects.toThrow(ForbiddenError);
+      await expect(canPublish.orThrow(ctx, post2)).rejects.toThrow(ForbiddenError);
 
       // Cannot publish someone else's post
       const post3: Post = { id: '3', authorId: '2', published: false };
-      await expect(authorize(ctx, canPublish, post3)).rejects.toThrow(ForbiddenError);
+      await expect(canPublish.orThrow(ctx, post3)).rejects.toThrow(ForbiddenError);
     });
   });
 });
