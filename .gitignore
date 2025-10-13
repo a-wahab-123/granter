@@ -33,6 +33,5 @@ coverage/
 .env.*.local
 
 # Package managers
-package-lock.json
 yarn.lock
 pnpm-lock.yaml
