@@ -1,0 +1,28 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "index",
+    "getting-started",
+    "---Core Concepts",
+    "permissions",
+    "operators",
+    "methods",
+    "---Guides",
+    "with-context",
+    "express",
+    "react",
+    "graphql",
+    "nextjs",
+    "---Advanced",
+    "parallel-execution",
+    "debugging",
+    "testing",
+    "---Integrations",
+    "auth-js",
+    "clerk",
+    "supabase",
+    "---Reference",
+    "api-reference",
+    "typescript"
+  ]
+}

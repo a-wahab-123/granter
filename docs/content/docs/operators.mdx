@@ -1,0 +1,225 @@
+---
+title: Operators
+description: Combine permissions with or, and, not, and their parallel variants
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Operators allow you to compose simple permissions into complex authorization rules.
+
+## `or()` - Any Permission
+
+The `or()` operator returns `true` if **any** permission allows the action.
+
+```typescript
+import { permission, or } from 'granter';
+
+const isAdmin = permission('isAdmin', (ctx) => ctx.user.role === 'admin');
+const isModerator = permission('isModerator', (ctx) => ctx.user.role === 'moderator');
+const isPostOwner = permission('isPostOwner', (ctx, post) => post.authorId === ctx.user.id);
+
+// User can edit if they're the owner OR an admin
+const canEditPost = or(isPostOwner, isAdmin);
+
+// Multiple alternatives
+const canModerate = or(isAdmin, isModerator);
+```
+
+<Callout title="Sequential Execution" type="info">
+  `or()` runs permissions **sequentially** and stops at the first success (short-circuit). This is efficient and intuitive for most use cases.
+</Callout>
+
+### Use Cases
+
+- **Role alternatives**: Admin OR Moderator
+- **Ownership checks**: Owner OR Team Member  
+- **Fallback permissions**: Premium Feature OR Free Trial Active
+
+## `and()` - All Permissions
+
+The `and()` operator returns `true` only if **all** permissions allow the action.
+
+```typescript
+import { and } from 'granter';
+
+const isAuthenticated = permission('isAuthenticated', (ctx) => !!ctx.user);
+const hasVerifiedEmail = permission('hasVerifiedEmail', (ctx) => ctx.user.emailVerified);
+const isNotBanned = permission('isNotBanned', (ctx) => !ctx.user.isBanned);
+
+// User must be authenticated AND have verified email AND not be banned
+const canCreatePost = and(isAuthenticated, hasVerifiedEmail, isNotBanned);
+
+// Complex composition
+const canPublish = and(
+  isAuthenticated,
+  hasVerifiedEmail,
+  or(isPostOwner, isAdmin)
+);
+```
+
+<Callout title="Sequential Execution" type="info">
+  `and()` runs permissions **sequentially** and stops at the first failure (short-circuit). Order cheap checks first for better performance.
+</Callout>
+
+### Use Cases
+
+- **Multiple requirements**: Authenticated AND Verified AND Not Banned
+- **Progressive enhancement**: Free User AND (Premium OR Trial Active)
+- **Complex rules**: Authenticated AND (Owner OR Admin) AND Not Locked
+
+## `not()` - Invert Permission
+
+The `not()` operator inverts a permission's result.
+
+```typescript
+import { not } from 'granter';
+
+const isBanned = permission('isBanned', (ctx) => ctx.user.isBanned);
+
+// Invert to check NOT banned
+const isNotBanned = not(isBanned);
+
+// Use in composition
+const canComment = and(
+  isAuthenticated,
+  not(isBanned),
+  not(isPostLocked)
+);
+```
+
+### Use Cases
+
+- **Negative checks**: Not Banned, Not Locked, Not Archived
+- **Exclusions**: Everyone except Guests
+- **Complex logic**: Not (Admin OR Moderator)
+
+## Nesting Operators
+
+Operators can be nested arbitrarily to create complex rules:
+
+```typescript
+// Complex nested logic
+const canModerateComment = and(
+  isAuthenticated,
+  not(isBanned),
+  or(
+    isAdmin,
+    and(isModerator, hasVerifiedEmail)
+  )
+);
+
+// Equivalent to:
+// User is authenticated AND
+// User is not banned AND
+// (User is admin OR (User is moderator AND has verified email))
+```
+
+## Type Safety
+
+Operators ensure all permissions use compatible resource types:
+
+```typescript
+type Post = { id: string; authorId: string };
+type Comment = { id: string; authorId: string; postId: string };
+
+const isPostOwner = permission('isPostOwner', (ctx, post: Post) => 
+  post.authorId === ctx.user.id
+);
+
+const isCommentOwner = permission('isCommentOwner', (ctx, comment: Comment) => 
+  comment.authorId === ctx.user.id
+);
+
+// ✅ Allowed: Same resource type
+const canEditPost = or(isPostOwner, isAdmin);
+
+// ✅ Allowed: Mix context-only with resource-specific
+const canDeletePost = and(isAuthenticated, isPostOwner);
+
+// ❌ TypeScript error: Incompatible resource types
+const mixed = or(isPostOwner, isCommentOwner);
+```
+
+## Performance Characteristics
+
+Both `or()` and `and()` use **sequential short-circuit evaluation** by default:
+
+```typescript
+// or() stops at first true
+const canView = or(
+  isPublic,      // ← Checked first (cheap, often true)
+  isOwner,       // ← Only checked if isPublic is false
+  isMember       // ← Only checked if both above are false
+);
+
+// and() stops at first false
+const canEdit = and(
+  isAuthenticated,    // ← Checked first (cheap)
+  hasPermission,      // ← Only checked if authenticated
+  isNotLocked         // ← Only checked if both above are true
+);
+```
+
+### Ordering for Performance
+
+Order your permissions strategically:
+
+```typescript
+// ✅ Good: Cheap checks first
+const canEdit = and(
+  isAuthenticated,     // In-memory check (fast)
+  isNotBanned,         // In-memory check (fast)
+  isPostOwner          // Database query (slow) - only if above pass
+);
+
+// ❌ Poor: Expensive checks first
+const canEdit = and(
+  isPostOwner,         // Database query runs first
+  isAuthenticated,     // Might fail here (wasted query)
+  isNotBanned
+);
+```
+
+## Parallel Operators
+
+For DataLoader batching or parallel I/O, use the parallel variants:
+
+```typescript
+import { orParallel, andParallel } from 'granter';
+
+// Run all checks in parallel (no short-circuit)
+const canView = orParallel(
+  isPublic,
+  isOwner,
+  isMember
+);
+
+const canEdit = andParallel(
+  isAuthenticated,
+  hasPermission,
+  isNotLocked
+);
+```
+
+<Callout title="When to Use Parallel" type="warn">
+  Use parallel operators **only** when you need DataLoader batching or truly parallel I/O. They run **all** checks even if earlier ones pass/fail, which is less efficient for most cases.
+  
+  See [Parallel Execution](/docs/parallel-execution) for details.
+</Callout>
+
+## Operator Comparison
+
+| Operator | Short-circuit | Execution | Use Case |
+|----------|---------------|-----------|----------|
+| `or()` | ✅ First true | Sequential | Default choice |
+| `and()` | ✅ First false | Sequential | Default choice |
+| `not()` | N/A | Single check | Invert permission |
+| `orParallel()` | ❌ None | Parallel | DataLoader batching |
+| `andParallel()` | ❌ None | Parallel | DataLoader batching |
+
+## Next Steps
+
+- [Methods](/docs/methods) - Learn about `orThrow`, `filter`, `explain`
+- [Parallel Execution](/docs/parallel-execution) - Deep dive into parallel operators
+- [Debugging](/docs/debugging) - Use `.explain()` to debug complex permissions
+

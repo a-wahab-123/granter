@@ -1,0 +1,461 @@
+---
+title: Express.js
+description: Complete Express.js REST API example with granter
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A complete example of using granter in an Express.js REST API.
+
+## Setup
+
+Install dependencies:
+
+```bash npm2yarn
+npm install express granter
+npm install -D @types/express
+```
+
+## Project Structure
+
+```
+src/
+├── permissions.ts      # All permissions
+├── types.ts           # TypeScript types
+├── middleware.ts      # Express middleware
+└── server.ts          # Routes and app
+```
+
+## Define Types
+
+```typescript title="types.ts"
+export type User = {
+  id: string;
+  email: string;
+  role: 'admin' | 'moderator' | 'user';
+  isBanned: boolean;
+  isVerified: boolean;
+};
+
+export type Post = {
+  id: string;
+  title: string;
+  content: string;
+  authorId: string;
+  published: boolean;
+  locked: boolean;
+};
+
+export type AppContext = {
+  user: User | null;
+  db: Database;
+};
+```
+
+## Create Permissions
+
+```typescript title="permissions.ts"
+import { permission, or, and, not } from 'granter';
+import type { AppContext, Post } from './types';
+
+// User permissions
+export const isAuthenticated = permission('isAuthenticated', (ctx: AppContext) => 
+  ctx.user !== null
+);
+
+export const isAdmin = permission('isAdmin', (ctx: AppContext) => 
+  ctx.user?.role === 'admin'
+);
+
+export const isModerator = permission('isModerator', (ctx: AppContext) => 
+  ctx.user?.role === 'moderator'
+);
+
+export const isVerified = permission('isVerified', (ctx: AppContext) => 
+  ctx.user?.isVerified ?? false
+);
+
+export const isNotBanned = permission('isNotBanned', (ctx: AppContext) => 
+  !ctx.user?.isBanned
+);
+
+// Post permissions
+export const isPostOwner = permission('isPostOwner', (ctx: AppContext, post: Post) => 
+  ctx.user?.id === post.authorId
+);
+
+export const isPostPublished = permission('isPostPublished', (ctx: AppContext, post: Post) => 
+  post.published
+);
+
+export const isPostLocked = permission('isPostLocked', (ctx: AppContext, post: Post) => 
+  post.locked
+);
+
+// Composed permissions
+export const canViewPost = or(
+  isPostPublished,
+  isPostOwner,
+  isAdmin,
+  isModerator
+);
+
+export const canCreatePost = and(
+  isAuthenticated,
+  isVerified,
+  isNotBanned
+);
+
+export const canEditPost = and(
+  isAuthenticated,
+  not(isPostLocked),
+  or(isPostOwner, isAdmin)
+);
+
+export const canDeletePost = and(
+  isAuthenticated,
+  or(isPostOwner, isAdmin)
+);
+
+export const canPublishPost = and(
+  isAuthenticated,
+  isVerified,
+  or(isPostOwner, isAdmin, isModerator)
+);
+```
+
+## Create Middleware
+
+```typescript title="middleware.ts"
+import type { Request, Response, NextFunction } from 'express';
+import { withContext } from 'granter';
+import * as permissions from './permissions';
+
+// Assuming you have auth middleware that sets req.user
+export function createAbilitiesMiddleware(req: Request, res: Response, next: NextFunction) {
+  // Create context from request
+  const ctx = {
+    user: req.user ?? null,
+    db: req.app.locals.db,
+  };
+
+  // Bind context to permissions
+  req.abilities = withContext(ctx, {
+    isAuthenticated: permissions.isAuthenticated,
+    isAdmin: permissions.isAdmin,
+    canViewPost: permissions.canViewPost,
+    canCreatePost: permissions.canCreatePost,
+    canEditPost: permissions.canEditPost,
+    canDeletePost: permissions.canDeletePost,
+    canPublishPost: permissions.canPublishPost,
+  });
+
+  next();
+}
+
+// Helper to require authentication
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!(await req.abilities.isAuthenticated())) {
+    return res.status(401).json({ error: 'Authentication required' });
+  }
+  next();
+}
+```
+
+<Callout title="TypeScript Types" type="info">
+  Extend Express types for full autocomplete:
+  
+  ```typescript
+  declare global {
+    namespace Express {
+      interface Request {
+        abilities: ReturnType<typeof withContext>;
+      }
+    }
+  }
+  ```
+</Callout>
+
+## Build Routes
+
+```typescript title="server.ts"
+import express from 'express';
+import { ForbiddenError } from 'granter';
+import { createAbilitiesMiddleware, requireAuth } from './middleware';
+
+const app = express();
+app.use(express.json());
+
+// 1. Authentication (your choice of library)
+app.use(authMiddleware); // Sets req.user
+
+// 2. Create abilities from context
+app.use(createAbilitiesMiddleware);
+
+// ============================================================================
+// PUBLIC ROUTES
+// ============================================================================
+
+// List all published posts
+app.get('/posts', async (req, res) => {
+  const allPosts = await db.posts.findMany();
+  
+  // Filter to only viewable posts
+  const viewablePosts = await req.abilities.canViewPost.filter(allPosts);
+  
+  res.json({ posts: viewablePosts });
+});
+
+// View specific post
+app.get('/posts/:id', async (req, res) => {
+  const post = await db.posts.findUnique({ 
+    where: { id: req.params.id } 
+  });
+  
+  if (!post) {
+    return res.status(404).json({ error: 'Post not found' });
+  }
+  
+  // Check view permission
+  if (!(await req.abilities.canViewPost(post))) {
+    return res.status(403).json({ error: 'Cannot view this post' });
+  }
+  
+  res.json({ post });
+});
+
+// ============================================================================
+// AUTHENTICATED ROUTES
+// ============================================================================
+
+// Create post (requires auth)
+app.post('/posts', requireAuth, async (req, res) => {
+  try {
+    // Check permission to create
+    await req.abilities.canCreatePost.orThrow();
+    
+    const post = await db.posts.create({
+      data: {
+        title: req.body.title,
+        content: req.body.content,
+        authorId: req.user.id,
+        published: false,
+      },
+    });
+    
+    res.status(201).json({ post });
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
+// Update post
+app.put('/posts/:id', requireAuth, async (req, res) => {
+  try {
+    const post = await db.posts.findUnique({ 
+      where: { id: req.params.id } 
+    });
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    
+    // Require edit permission
+    await req.abilities.canEditPost.orThrow(post, 'You cannot edit this post');
+    
+    const updated = await db.posts.update({
+      where: { id: post.id },
+      data: {
+        title: req.body.title ?? post.title,
+        content: req.body.content ?? post.content,
+      },
+    });
+    
+    res.json({ post: updated });
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
+// Delete post
+app.delete('/posts/:id', requireAuth, async (req, res) => {
+  try {
+    const post = await db.posts.findUnique({ 
+      where: { id: req.params.id } 
+    });
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    
+    // Require delete permission
+    await req.abilities.canDeletePost.orThrow(post);
+    
+    await db.posts.delete({ where: { id: post.id } });
+    
+    res.status(204).send();
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
+// Publish/unpublish post
+app.patch('/posts/:id/publish', requireAuth, async (req, res) => {
+  try {
+    const post = await db.posts.findUnique({ 
+      where: { id: req.params.id } 
+    });
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    
+    await req.abilities.canPublishPost.orThrow(post);
+    
+    const updated = await db.posts.update({
+      where: { id: post.id },
+      data: { published: req.body.published },
+    });
+    
+    res.json({ post: updated });
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
+// ============================================================================
+// DEBUG ROUTES (Development only)
+// ============================================================================
+
+if (process.env.NODE_ENV === 'development') {
+  // Explain permissions for a post
+  app.get('/posts/:id/permissions', requireAuth, async (req, res) => {
+    const post = await db.posts.findUnique({ 
+      where: { id: req.params.id } 
+    });
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+    
+    const permissions = {
+      canView: await req.abilities.canViewPost.explain(post),
+      canEdit: await req.abilities.canEditPost.explain(post),
+      canDelete: await req.abilities.canDeletePost.explain(post),
+      canPublish: await req.abilities.canPublishPost.explain(post),
+    };
+    
+    res.json({ permissions });
+  });
+}
+
+// Start server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+```
+
+## Error Handling
+
+Create a global error handler for permission errors:
+
+```typescript
+import { ForbiddenError, UnauthorizedError } from 'granter';
+
+app.use((err, req, res, next) => {
+  if (err instanceof UnauthorizedError) {
+    return res.status(401).json({ 
+      error: 'Unauthorized',
+      message: err.message 
+    });
+  }
+  
+  if (err instanceof ForbiddenError) {
+    return res.status(403).json({ 
+      error: 'Forbidden',
+      message: err.message 
+    });
+  }
+  
+  // Other errors
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+```
+
+## Testing
+
+Test permissions with supertest:
+
+```typescript
+import request from 'supertest';
+import { app } from './server';
+
+describe('POST /posts', () => {
+  it('should allow authenticated users to create posts', async () => {
+    const response = await request(app)
+      .post('/posts')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ title: 'Test', content: 'Content' });
+    
+    expect(response.status).toBe(201);
+  });
+  
+  it('should deny unauthenticated users', async () => {
+    const response = await request(app)
+      .post('/posts')
+      .send({ title: 'Test', content: 'Content' });
+    
+    expect(response.status).toBe(401);
+  });
+});
+
+describe('PUT /posts/:id', () => {
+  it('should allow post owner to edit', async () => {
+    const response = await request(app)
+      .put(`/posts/${postId}`)
+      .set('Authorization', `Bearer ${ownerToken}`)
+      .send({ title: 'Updated' });
+    
+    expect(response.status).toBe(200);
+  });
+  
+  it('should deny non-owner', async () => {
+    const response = await request(app)
+      .put(`/posts/${postId}`)
+      .set('Authorization', `Bearer ${otherUserToken}`)
+      .send({ title: 'Updated' });
+    
+    expect(response.status).toBe(403);
+  });
+  
+  it('should allow admin to edit any post', async () => {
+    const response = await request(app)
+      .put(`/posts/${postId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ title: 'Updated' });
+    
+    expect(response.status).toBe(200);
+  });
+});
+```
+
+## Next Steps
+
+- [Hono Example](/docs/hono) - Similar pattern with Hono
+- [Testing](/docs/testing) - Deep dive into testing permissions
+- [Debugging](/docs/debugging) - Use `.explain()` for debugging
+

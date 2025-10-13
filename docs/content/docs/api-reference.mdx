@@ -1,0 +1,424 @@
+---
+title: API Reference
+description: Complete API reference for all granter functions and types
+---
+
+## Core Functions
+
+### `permission()`
+
+Create a permission check function.
+
+```typescript
+function permission<TContext, TResource = undefined>(
+  name: string,
+  check: PermissionCheck<TContext, TResource>
+): Permission<TContext, TResource>
+```
+
+**Parameters:**
+- `name` - Human-readable permission name (used in `.explain()` output)
+- `check` - Function that returns `boolean` or `Promise<boolean>`
+
+**Returns:** A callable `Permission` object with methods
+
+**Example:**
+
+```typescript
+// Context-only permission
+const isAdmin = permission('isAdmin', (ctx: AppContext) => {
+  return ctx.user.role === 'admin';
+});
+
+// Resource-based permission
+const isPostOwner = permission('isPostOwner', (ctx: AppContext, post: Post) => {
+  return post.authorId === ctx.user.id;
+});
+
+// Async permission
+const hasMembership = permission('hasMembership', async (ctx: AppContext, orgId: string) => {
+  const membership = await ctx.db.membership.findFirst({
+    where: { userId: ctx.user.id, organizationId: orgId }
+  });
+  return !!membership;
+});
+```
+
+---
+
+### `or()`
+
+Combine permissions with OR logic (any permission must pass).
+
+```typescript
+function or<TContext, TResource>(
+  ...permissions: Permission<TContext, TResource>[]
+): Permission<TContext, TResource>
+```
+
+**Behavior:**
+- Runs permissions **sequentially**
+- **Short-circuits** on first `true` (stops checking remaining permissions)
+- Returns `true` if any permission passes
+
+**Example:**
+
+```typescript
+const canEdit = or(isPostOwner, isAdmin, isModerator);
+
+// Stops at first true:
+// 1. Check isPostOwner → false
+// 2. Check isAdmin → true (stop here, return true)
+// 3. isModerator never runs
+```
+
+---
+
+### `and()`
+
+Combine permissions with AND logic (all permissions must pass).
+
+```typescript
+function and<TContext, TResource>(
+  ...permissions: Permission<TContext, TResource>[]
+): Permission<TContext, TResource>
+```
+
+**Behavior:**
+- Runs permissions **sequentially**
+- **Short-circuits** on first `false` (stops checking remaining permissions)
+- Returns `true` only if all permissions pass
+
+**Example:**
+
+```typescript
+const canPublish = and(isAuthenticated, isVerified, isPostOwner);
+
+// Stops at first false:
+// 1. Check isAuthenticated → true
+// 2. Check isVerified → false (stop here, return false)
+// 3. isPostOwner never runs
+```
+
+---
+
+### `not()`
+
+Invert a permission's result.
+
+```typescript
+function not<TContext, TResource>(
+  permission: Permission<TContext, TResource>
+): Permission<TContext, TResource>
+```
+
+**Example:**
+
+```typescript
+const isBanned = permission('isBanned', (ctx) => ctx.user.isBanned);
+const isNotBanned = not(isBanned);
+
+const canComment = and(isAuthenticated, not(isBanned));
+```
+
+---
+
+### `orParallel()`
+
+Parallel OR operator for DataLoader batching.
+
+```typescript
+function orParallel<TContext, TResource>(
+  ...permissions: Permission<TContext, TResource>[]
+): Permission<TContext, TResource>
+```
+
+**Behavior:**
+- Runs permissions **in parallel** using `Promise.all()`
+- **No short-circuit** (all permissions run even if one passes)
+- Returns `true` if any permission passes
+
+**Use when:**
+- Using DataLoader for database batching
+- All checks are async I/O that can run concurrently
+- Short-circuit optimization is less important than batching
+
+**Example:**
+
+```typescript
+const canView = orParallel(
+  isPublic,
+  isMember,
+  hasSharedLink
+);
+
+// All three checks run in parallel
+```
+
+---
+
+### `andParallel()`
+
+Parallel AND operator for DataLoader batching.
+
+```typescript
+function andParallel<TContext, TResource>(
+  ...permissions: Permission<TContext, TResource>[]
+): Permission<TContext, TResource>
+```
+
+**Behavior:**
+- Runs permissions **in parallel** using `Promise.all()`
+- **No short-circuit** (all permissions run even if one fails)
+- Returns `true` only if all permissions pass
+
+**Example:**
+
+```typescript
+const canEdit = andParallel(
+  isAuthenticated,
+  hasPermission,
+  isNotLocked
+);
+
+// All three checks run in parallel
+```
+
+---
+
+### `withContext()`
+
+Bind context to permissions for cleaner code.
+
+```typescript
+function withContext<TContext, T extends Record<string, Permission<TContext, any>>>(
+  ctx: TContext,
+  permissions: T
+): BoundPermissions<TContext, T>
+```
+
+**Parameters:**
+- `ctx` - Application context
+- `permissions` - Object of permissions to bind
+
+**Returns:** Object with same keys, but permissions no longer require `ctx` argument
+
+**Example:**
+
+```typescript
+const abilities = withContext(ctx, {
+  canEdit,
+  canDelete,
+  isAdmin,
+});
+
+// No ctx needed
+await abilities.canEdit(post);
+await abilities.isAdmin();
+
+// Methods still work
+await abilities.canEdit.orThrow(post);
+const editable = await abilities.canEdit.filter(posts);
+```
+
+---
+
+## Permission Methods
+
+Every `Permission` object has these methods:
+
+### Direct Call
+
+Check if action is allowed.
+
+```typescript
+(ctx: TContext, resource?: TResource): Promise<boolean>
+```
+
+**Example:**
+
+```typescript
+if (await canEdit(ctx, post)) {
+  // User can edit
+}
+```
+
+---
+
+### `.orThrow()`
+
+Require permission (throws if denied).
+
+```typescript
+orThrow(
+  ctx: TContext,
+  resource?: TResource,
+  error?: string | Error | (() => Error)
+): Promise<void>
+```
+
+**Parameters:**
+- `ctx` - Application context
+- `resource` - (Optional) Resource to check
+- `error` - (Optional) Custom error message/instance/factory
+
+**Throws:** `ForbiddenError` if permission denied
+
+**Example:**
+
+```typescript
+// Default error
+await canEdit.orThrow(ctx, post);
+
+// Custom message
+await canEdit.orThrow(ctx, post, 'You cannot edit this post');
+
+// Custom error
+await canEdit.orThrow(ctx, post, new CustomError('Denied'));
+
+// Error factory
+await canEdit.orThrow(ctx, post, () => new CustomError('Denied'));
+```
+
+---
+
+### `.filter()`
+
+Filter array to only allowed items.
+
+```typescript
+filter(ctx: TContext, resources: TResource[]): Promise<TResource[]>
+```
+
+**Parameters:**
+- `ctx` - Application context
+- `resources` - Array of resources to filter
+
+**Returns:** New array with only allowed items
+
+**Example:**
+
+```typescript
+const allPosts = await db.posts.findMany();
+const editablePosts = await canEdit.filter(ctx, allPosts);
+
+console.log(`Can edit ${editablePosts.length} of ${allPosts.length} posts`);
+```
+
+---
+
+### `.explain()`
+
+Debug why permission passed/failed.
+
+```typescript
+explain(ctx: TContext, resource?: TResource): Promise<ExplanationResult>
+```
+
+**Parameters:**
+- `ctx` - Application context
+- `resource` - (Optional) Resource to check
+
+**Returns:** Detailed explanation of permission evaluation
+
+**Example:**
+
+```typescript
+const explanation = await canEdit.explain(ctx, post);
+console.log(JSON.stringify(explanation, null, 2));
+```
+
+---
+
+## Types
+
+### `Permission<TContext, TResource>`
+
+A callable permission function with methods.
+
+```typescript
+type Permission<TContext, TResource = undefined> = {
+  (ctx: TContext, resource: TResource): Promise<boolean>;
+  name: string;
+  children: Permission<TContext, TResource>[];
+  orThrow(ctx: TContext, resource: TResource, error?: string | Error | (() => Error)): Promise<void>;
+  filter(ctx: TContext, resources: TResource[]): Promise<TResource[]>;
+  explain(ctx: TContext, resource: TResource): Promise<ExplanationResult>;
+}
+```
+
+---
+
+### `PermissionCheck<TContext, TResource>`
+
+The check function passed to `permission()`.
+
+```typescript
+type PermissionCheck<TContext, TResource = undefined> = (
+  ctx: TContext,
+  resource: TResource
+) => boolean | Promise<boolean>
+```
+
+---
+
+### `ExplanationResult`
+
+Result from `.explain()` method.
+
+```typescript
+type ExplanationResult = {
+  name: string;           // Permission name
+  value: boolean;         // Result (true/false)
+  duration: number;       // Time in milliseconds
+  operator?: 'OR' | 'AND' | 'NOT';  // Operator type (if composed)
+  children?: ExplanationResult[];   // Nested permissions (if composed)
+}
+```
+
+---
+
+## Error Types
+
+### `ForbiddenError`
+
+Thrown by `.orThrow()` when permission denied.
+
+```typescript
+class ForbiddenError extends Error {
+  constructor(message?: string);
+}
+```
+
+---
+
+### `UnauthorizedError`
+
+For unauthenticated requests (you throw this manually).
+
+```typescript
+class UnauthorizedError extends Error {
+  constructor(message?: string);
+}
+```
+
+---
+
+### `PermissionError`
+
+Base class for permission errors.
+
+```typescript
+class PermissionError extends Error {
+  constructor(message?: string);
+}
+```
+
+---
+
+## Next Steps
+
+- [TypeScript Guide](/docs/typescript) - Advanced TypeScript patterns
+- [Testing](/docs/testing) - How to test permissions
+- [Examples](/docs/express) - See API in action
+

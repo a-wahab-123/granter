@@ -1,0 +1,301 @@
+---
+title: Methods
+description: Use orThrow, filter, and explain methods on permissions
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+Every permission is a callable function with helpful methods for common authorization patterns.
+
+## Direct Call - Boolean Check
+
+The simplest way to use a permission is to call it directly:
+
+```typescript
+const isAdmin = permission('isAdmin', (ctx) => ctx.user.role === 'admin');
+
+// Returns Promise<boolean>
+if (await isAdmin(ctx)) {
+  console.log('User is an admin');
+}
+
+// With resource
+const canEdit = or(isPostOwner, isAdmin);
+const post = await db.getPost('123');
+
+if (await canEdit(ctx, post)) {
+  await db.updatePost(post, updates);
+}
+```
+
+## `.orThrow()` - Require Permission
+
+Throw an error if the permission is denied:
+
+```typescript
+// Throws ForbiddenError if denied
+await canEditPost.orThrow(ctx, post);
+await db.updatePost(post, updates);
+
+// With custom error message
+await canEditPost.orThrow(ctx, post, 'You cannot edit this post');
+
+// With custom Error instance
+await canEditPost.orThrow(ctx, post, new ForbiddenError('Access denied'));
+
+// With Error factory
+await canEditPost.orThrow(ctx, post, () => new CustomError('Not allowed'));
+```
+
+### Error Types
+
+granter provides built-in error types:
+
+```typescript
+import { ForbiddenError, UnauthorizedError } from 'granter';
+
+try {
+  await canEdit.orThrow(ctx, post);
+} catch (error) {
+  if (error instanceof ForbiddenError) {
+    // Handle 403 Forbidden
+    return res.status(403).json({ error: error.message });
+  }
+  throw error;
+}
+```
+
+### Use Cases
+
+Perfect for:
+- **REST APIs**: Protect endpoints
+- **GraphQL Resolvers**: Guard field resolution
+- **Server Actions**: Next.js/Remix form handlers
+- **RPC handlers**: tRPC, Hono RPC
+
+```typescript
+// Express.js
+app.delete('/posts/:id', async (req, res) => {
+  const post = await getPost(req.params.id);
+  
+  try {
+    await canDelete.orThrow(req.ctx, post);
+    await deletePost(post);
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+
+// Next.js Server Action
+async function updatePost(postId: string, updates: Partial<Post>) {
+  const session = await getSession();
+  const ctx = { user: session.user, db };
+  const post = await db.getPost(postId);
+  
+  await canEdit.orThrow(ctx, post); // Throws if not allowed
+  return db.updatePost(postId, updates);
+}
+```
+
+## `.filter()` - Filter Arrays
+
+Filter an array of resources to only those the user can access:
+
+```typescript
+const allPosts = await db.getPosts();
+
+// Returns only posts user can edit
+const editablePosts = await canEdit.filter(ctx, allPosts);
+
+console.log(`User can edit ${editablePosts.length} of ${allPosts.length} posts`);
+```
+
+### How It Works
+
+The `.filter()` method:
+1. Checks the permission for each item in parallel
+2. Returns a new array with only allowed items
+3. Preserves original array order
+
+```typescript
+// Internal behavior (simplified)
+async filter(ctx, resources) {
+  const results = await Promise.all(
+    resources.map(resource => this(ctx, resource))
+  );
+  return resources.filter((_, index) => results[index]);
+}
+```
+
+### Use Cases
+
+Perfect for:
+- **List endpoints**: Return only accessible items
+- **UI rendering**: Show only available actions
+- **Batch operations**: Process only allowed items
+
+```typescript
+// REST API - list editable posts
+app.get('/posts/editable', async (req, res) => {
+  const allPosts = await db.getPosts();
+  const editablePosts = await canEdit.filter(req.ctx, allPosts);
+  res.json({ posts: editablePosts });
+});
+
+// GraphQL - filter in resolver
+const resolvers = {
+  Query: {
+    myEditablePosts: async (_, __, ctx) => {
+      const allPosts = await db.getPosts({ authorId: ctx.user.id });
+      return canEdit.filter(ctx, allPosts);
+    },
+  },
+};
+
+// UI - show available actions
+async function PostList({ posts, ctx }) {
+  const deletablePosts = await canDelete.filter(ctx, posts);
+  const deletableIds = new Set(deletablePosts.map(p => p.id));
+  
+  return posts.map(post => (
+    <Post key={post.id}>
+      {deletableIds.has(post.id) && <DeleteButton />}
+    </Post>
+  ));
+}
+```
+
+<Callout title="Performance Note" type="warn">
+  `.filter()` checks **all** items in parallel. For large arrays, consider pagination or more selective queries.
+</Callout>
+
+## `.explain()` - Debug Permissions
+
+Understand why a permission passed or failed:
+
+```typescript
+const canEdit = and(
+  isAuthenticated,
+  not(isPostLocked),
+  or(isPostOwner, isAdmin)
+);
+
+const explanation = await canEdit.explain(ctx, post);
+console.log(JSON.stringify(explanation, null, 2));
+```
+
+Output:
+
+```json
+{
+  "name": "(isAuthenticated AND (NOT isPostLocked) AND (isPostOwner OR isAdmin))",
+  "value": false,
+  "duration": 23.45,
+  "children": [
+    {
+      "name": "isAuthenticated",
+      "value": true,
+      "duration": 0.12
+    },
+    {
+      "name": "(NOT isPostLocked)",
+      "value": true,
+      "duration": 0.08,
+      "operator": "NOT",
+      "children": [
+        { "name": "isPostLocked", "value": false, "duration": 0.06 }
+      ]
+    },
+    {
+      "name": "(isPostOwner OR isAdmin)",
+      "value": false,
+      "duration": 15.32,
+      "operator": "OR",
+      "children": [
+        { "name": "isPostOwner", "value": false, "duration": 8.21 },
+        { "name": "isAdmin", "value": false, "duration": 7.11 }
+      ]
+    }
+  ]
+}
+```
+
+### Explanation Structure
+
+```typescript
+type ExplanationResult = {
+  name: string;           // Permission name
+  value: boolean;         // Result (true/false)
+  duration: number;       // Time in milliseconds
+  operator?: 'OR' | 'AND' | 'NOT';  // Operator type
+  children?: ExplanationResult[];   // Nested permissions
+};
+```
+
+### Use Cases
+
+Perfect for:
+- **Debugging**: Understand complex permission failures
+- **Development**: Verify permission logic
+- **Support**: Help users understand why they can't access something
+- **Auditing**: Log permission checks for compliance
+
+```typescript
+// Development debugging
+if (process.env.NODE_ENV === 'development') {
+  const explanation = await canEdit.explain(ctx, post);
+  console.log('Permission check:', explanation);
+}
+
+// User-facing explanation
+try {
+  await canEdit.orThrow(ctx, post);
+} catch (error) {
+  const explanation = await canEdit.explain(ctx, post);
+  
+  // Show user why they can't edit
+  const reasons = [];
+  if (!explanation.children?.find(c => c.name === 'isAuthenticated')?.value) {
+    reasons.push('You must be logged in');
+  }
+  if (!explanation.children?.find(c => c.name.includes('isPostOwner'))?.value) {
+    reasons.push('You must be the post owner');
+  }
+  
+  return { error: 'Cannot edit post', reasons };
+}
+
+// Audit logging
+const explanation = await canDelete.explain(ctx, post);
+await auditLog.create({
+  userId: ctx.user.id,
+  action: 'delete_post',
+  postId: post.id,
+  allowed: explanation.value,
+  reasons: explanation,
+});
+```
+
+<Callout title="Performance Impact" type="warn">
+  `.explain()` runs **all** permission checks, even those that would normally short-circuit. Only use it for debugging, development, or auditing - not in hot paths.
+</Callout>
+
+## Method Comparison
+
+| Method | Returns | Throws | Use Case |
+|--------|---------|--------|----------|
+| Direct call | `Promise<boolean>` | ❌ No | Conditional logic |
+| `.orThrow()` | `Promise<void>` | ✅ Yes | Protect operations |
+| `.filter()` | `Promise<T[]>` | ❌ No | Filter arrays |
+| `.explain()` | `Promise<ExplanationResult>` | ❌ No | Debugging |
+
+## Next Steps
+
+- [withContext](/docs/with-context) - Simplify permission calls
+- [Debugging](/docs/debugging) - Deep dive into `.explain()`
+- [Express Example](/docs/express) - See methods in a real API
+

@@ -1,0 +1,358 @@
+---
+title: withContext
+description: Bind context once and simplify permission calls
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+When you need to call many permissions with the same context, `withContext()` eliminates repetitive `ctx` passing.
+
+## The Problem
+
+Without `withContext()`, you pass context every time:
+
+```typescript
+// Repetitive ctx passing
+if (await isAuthenticated(ctx)) {
+  if (await canEdit(ctx, post)) {
+    if (await canDelete(ctx, post)) {
+      // ... more permissions
+    }
+  }
+}
+```
+
+## The Solution
+
+Bind context once, then call permissions without it:
+
+```typescript
+import { withContext } from 'granter';
+
+const abilities = withContext(ctx, {
+  isAuthenticated,
+  canEdit,
+  canDelete,
+});
+
+// No ctx needed!
+if (await abilities.isAuthenticated()) {
+  if (await abilities.canEdit(post)) {
+    if (await abilities.canDelete(post)) {
+      // Clean!
+    }
+  }
+}
+```
+
+## Basic Usage
+
+```typescript
+import { permission, or, withContext } from 'granter';
+
+// 1. Define permissions
+const isAdmin = permission('isAdmin', (ctx) => ctx.user.role === 'admin');
+const canEditPost = permission('canEditPost', (ctx, post) => post.authorId === ctx.user.id);
+
+// 2. Create context
+const ctx = { user: { id: '1', role: 'user' }, db };
+
+// 3. Bind context
+const abilities = withContext(ctx, {
+  isAdmin,
+  canEditPost,
+});
+
+// 4. Use without ctx
+if (await abilities.isAdmin()) {
+  console.log('Is admin!');
+}
+
+if (await abilities.canEditPost(post)) {
+  console.log('Can edit this post!');
+}
+```
+
+## With Methods
+
+All permission methods work with `withContext()`:
+
+```typescript
+const abilities = withContext(ctx, {
+  canEdit,
+  canDelete,
+});
+
+// Direct call
+if (await abilities.canEdit(post)) { /* ... */ }
+
+// orThrow
+await abilities.canEdit.orThrow(post);
+await abilities.canEdit.orThrow(post, 'Cannot edit');
+
+// filter
+const editable = await abilities.canEdit.filter(posts);
+
+// explain
+const explanation = await abilities.canEdit.explain(post);
+```
+
+## Express.js Middleware
+
+Attach abilities to the request object:
+
+```typescript
+import express from 'express';
+import { withContext } from 'granter';
+
+const app = express();
+
+// Authentication middleware (runs first)
+app.use(authMiddleware); // Sets req.user
+
+// Create abilities middleware
+app.use((req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const ctx = {
+    user: req.user,
+    db: req.app.locals.db,
+  };
+
+  // Bind only the permissions you need
+  req.abilities = withContext(ctx, {
+    isAuthenticated,
+    isAdmin,
+    canEditPost,
+    canDeletePost,
+  });
+
+  next();
+});
+
+// Use in routes
+app.put('/posts/:id', async (req, res) => {
+  const post = await getPost(req.params.id);
+
+  if (!(await req.abilities.canEditPost(post))) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  await updatePost(post, req.body);
+  res.json({ success: true });
+});
+
+app.delete('/posts/:id', async (req, res) => {
+  const post = await getPost(req.params.id);
+
+  try {
+    await req.abilities.canDeletePost.orThrow(post);
+    await deletePost(post);
+    res.json({ success: true });
+  } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return res.status(403).json({ error: error.message });
+    }
+    throw error;
+  }
+});
+```
+
+<Callout title="TypeScript Tip" type="info">
+  Extend Express types for autocomplete:
+  
+  ```typescript
+  declare global {
+    namespace Express {
+      interface Request {
+        abilities: ReturnType<typeof withContext<AppContext, typeof permissions>>;
+      }
+    }
+  }
+  ```
+</Callout>
+
+## React Context Pattern
+
+Use with React Context for component-level permissions:
+
+```typescript
+import { createContext, useContext, useMemo } from 'react';
+import { withContext } from 'granter';
+
+// Create context
+const AbilitiesContext = createContext(null);
+
+// Provider component
+export function AbilitiesProvider({ children, user, db }) {
+  const ctx = useMemo(() => ({ user, db }), [user, db]);
+
+  const abilities = useMemo(
+    () => withContext(ctx, {
+      isAuthenticated,
+      canEditPost,
+      canDeletePost,
+      canCreateComment,
+    }),
+    [ctx]
+  );
+
+  return (
+    <AbilitiesContext.Provider value={abilities}>
+      {children}
+    </AbilitiesContext.Provider>
+  );
+}
+
+// Hook for components
+export function useAbilities() {
+  const abilities = useContext(AbilitiesContext);
+  if (!abilities) {
+    throw new Error('useAbilities must be used within AbilitiesProvider');
+  }
+  return abilities;
+}
+
+// Usage in component
+function PostCard({ post }) {
+  const abilities = useAbilities();
+  const [canEdit, setCanEdit] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      abilities.canEditPost(post),
+      abilities.canDeletePost(post),
+    ]).then(([edit, del]) => {
+      setCanEdit(edit);
+      setCanDelete(del);
+    });
+  }, [post, abilities]);
+
+  return (
+    <div>
+      <h3>{post.title}</h3>
+      {canEdit && <button>Edit</button>}
+      {canDelete && <button>Delete</button>}
+    </div>
+  );
+}
+```
+
+## Next.js App Router
+
+Use in Server Actions and RSC:
+
+```typescript
+// app/actions/posts.ts
+'use server';
+
+import { getSession } from '@/lib/auth';
+import { withContext } from 'granter';
+import { canEditPost, canDeletePost } from '@/lib/permissions';
+
+async function getAbilities() {
+  const session = await getSession();
+  const ctx = { user: session.user, db: prisma };
+  
+  return withContext(ctx, {
+    canEditPost,
+    canDeletePost,
+  });
+}
+
+export async function updatePost(postId: string, updates: Partial<Post>) {
+  const abilities = await getAbilities();
+  const post = await prisma.post.findUnique({ where: { id: postId } });
+  
+  await abilities.canEditPost.orThrow(post);
+  return prisma.post.update({ where: { id: postId }, data: updates });
+}
+
+export async function deletePost(postId: string) {
+  const abilities = await getAbilities();
+  const post = await prisma.post.findUnique({ where: { id: postId } });
+  
+  await abilities.canDeletePost.orThrow(post);
+  return prisma.post.delete({ where: { id: postId } });
+}
+```
+
+## Hono Context
+
+Attach to Hono context:
+
+```typescript
+import { Hono } from 'hono';
+import { withContext } from 'granter';
+
+const app = new Hono();
+
+app.use('*', authMiddleware);
+
+app.use('*', async (c, next) => {
+  const user = c.get('user');
+  const ctx = { user, db: prisma };
+  
+  c.set('abilities', withContext(ctx, {
+    canEditPost,
+    canDeletePost,
+  }));
+  
+  await next();
+});
+
+app.put('/posts/:id', async (c) => {
+  const abilities = c.get('abilities');
+  const post = await getPost(c.req.param('id'));
+  
+  await abilities.canEditPost.orThrow(post);
+  await updatePost(post, await c.req.json());
+  
+  return c.json({ success: true });
+});
+```
+
+## TypeScript Inference
+
+`withContext()` preserves full type safety:
+
+```typescript
+const abilities = withContext(ctx, {
+  canEditPost,  // Requires (post: Post) => Promise<boolean>
+  isAdmin,      // Requires () => Promise<boolean>
+});
+
+// ✅ Type-safe
+await abilities.canEditPost(post);
+await abilities.isAdmin();
+
+// ❌ TypeScript errors
+await abilities.canEditPost();        // Missing argument
+await abilities.isAdmin(post);        // Unexpected argument
+await abilities.canEditPost(comment); // Wrong type
+```
+
+## When to Use
+
+Use `withContext()` when:
+
+- ✅ You call multiple permissions with the same context
+- ✅ You want cleaner, less repetitive code  
+- ✅ You're using middleware patterns (Express, Hono)
+- ✅ You're using React Context or similar patterns
+
+Don't use `withContext()` when:
+
+- ❌ You only call one or two permissions
+- ❌ Context changes frequently
+- ❌ You prefer explicit context passing
+
+## Next Steps
+
+- [Express Example](/docs/express) - Full Express.js app with `withContext()`
+- [React Example](/docs/react) - React app with abilities context
+- [Next.js Example](/docs/nextjs) - Server Actions with `withContext()`
+

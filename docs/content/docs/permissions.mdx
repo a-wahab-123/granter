@@ -1,0 +1,195 @@
+---
+title: Permissions
+description: Learn how to create and use permissions in granter
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+A **permission** is a named function that checks if an action is allowed. Permissions are the building blocks of granter.
+
+## Basic Permission
+
+Create a permission with `permission(name, checkFunction)`:
+
+```typescript
+import { permission } from 'granter';
+
+const isAdmin = permission('isAdmin', (ctx: AppContext) => {
+  return ctx.user.role === 'admin';
+});
+```
+
+## Context-Only Permissions
+
+Permissions without a resource check only the context:
+
+```typescript
+const isAuthenticated = permission('isAuthenticated', (ctx: AppContext) => 
+  !!ctx.user
+);
+
+const hasVerifiedEmail = permission('hasVerifiedEmail', (ctx: AppContext) => 
+  ctx.user.emailVerified
+);
+
+// Usage - no resource needed
+if (await isAuthenticated(ctx)) {
+  // User is logged in
+}
+```
+
+## Resource-Based Permissions
+
+Permissions can check a specific resource (entity):
+
+```typescript
+type Post = {
+  id: string;
+  authorId: string;
+  published: boolean;
+};
+
+const isPostOwner = permission('isPostOwner', (ctx: AppContext, post: Post) => {
+  return post.authorId === ctx.user.id;
+});
+
+const isPostPublished = permission('isPostPublished', (ctx: AppContext, post: Post) => {
+  return post.published;
+});
+
+// Usage - resource required
+const post = await db.getPost('123');
+if (await isPostOwner(ctx, post)) {
+  // User owns this post
+}
+```
+
+## Async Permissions
+
+Permissions can be **async** for database queries, API calls, etc:
+
+```typescript
+const canAccessOrganization = permission(
+  'canAccessOrganization',
+  async (ctx: AppContext, orgId: string) => {
+    const membership = await ctx.db.membership.findFirst({
+      where: {
+        userId: ctx.user.id,
+        organizationId: orgId,
+      },
+    });
+    return !!membership;
+  }
+);
+
+// Async usage
+if (await canAccessOrganization(ctx, 'org-123')) {
+  // User has access
+}
+```
+
+<Callout title="Performance Tip" type="warn">
+  Async permissions can be expensive. Consider using **DataLoader** or caching to batch/deduplicate database queries. See [Parallel Execution](/docs/parallel-execution) for details.
+</Callout>
+
+## Permission Factories
+
+Create reusable permission patterns with factory functions:
+
+```typescript
+// Generic role checker
+const hasRole = (role: string) =>
+  permission(`hasRole:${role}`, (ctx: AppContext) => 
+    ctx.user.roles.includes(role)
+  );
+
+// Generate permissions
+const isModerator = hasRole('moderator');
+const isEditor = hasRole('editor');
+const isViewer = hasRole('viewer');
+
+// Generic ownership checker
+const isOwnerOf = <T extends { userId: string }>(resourceName: string) =>
+  permission(
+    `isOwnerOf:${resourceName}`,
+    (ctx: AppContext, resource: T) => resource.userId === ctx.user.id
+  );
+
+// Generate permissions
+const isCommentOwner = isOwnerOf<Comment>('comment');
+const isPostOwner = isOwnerOf<Post>('post');
+```
+
+## Type Safety
+
+granter provides full TypeScript inference:
+
+```typescript
+type AppContext = {
+  user: { id: string; role: string };
+  db: Database;
+};
+
+type Post = {
+  id: string;
+  authorId: string;
+};
+
+const isPostOwner = permission('isPostOwner', (ctx: AppContext, post: Post) => {
+  return post.authorId === ctx.user.id;
+});
+
+// ✅ Correct usage
+await isPostOwner(ctx, post);
+
+// ❌ TypeScript error - missing resource
+await isPostOwner(ctx);
+
+// ❌ TypeScript error - wrong resource type
+await isPostOwner(ctx, comment);
+```
+
+## Permission Properties
+
+Every permission has useful properties:
+
+```typescript
+const isAdmin = permission('isAdmin', (ctx: AppContext) => 
+  ctx.user.role === 'admin'
+);
+
+// Name
+console.log(isAdmin.name); // 'isAdmin'
+
+// Children (empty for basic permissions)
+console.log(isAdmin.children); // []
+```
+
+## Naming Conventions
+
+Use clear, descriptive names:
+
+```typescript
+// ✅ Good names
+const isAdmin = permission('isAdmin', ...);
+const canEditPost = permission('canEditPost', ...);
+const hasVerifiedEmail = permission('hasVerifiedEmail', ...);
+
+// ❌ Avoid
+const check1 = permission('check1', ...);
+const perm = permission('perm', ...);
+```
+
+Names are used in:
+- Debug output from `.explain()`
+- Error messages
+- Logs and monitoring
+
+## Next Steps
+
+Now that you understand permissions, learn how to compose them:
+
+- [Operators](/docs/operators) - Combine permissions with `or`, `and`, `not`
+- [Methods](/docs/methods) - Use `orThrow`, `filter`, `explain`
+- [Testing](/docs/testing) - How to test permissions
+

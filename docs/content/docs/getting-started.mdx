@@ -1,0 +1,213 @@
+---
+title: Getting Started
+description: Install and use granter in your TypeScript project
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+
+## Installation
+
+Install granter with your package manager:
+
+```bash npm2yarn
+npm install granter
+```
+
+## Quick Start
+
+<Steps>
+
+<Step>
+
+### Define Your Types
+
+Create types for your application context and resources:
+
+```typescript
+type AppContext = {
+  user: { id: string; role: string };
+  db: Database;
+};
+
+type Post = {
+  id: string;
+  authorId: string;
+  title: string;
+};
+```
+
+</Step>
+
+<Step>
+
+### Create Permissions
+
+Define simple permission checks:
+
+```typescript
+import { permission } from 'granter';
+
+// Without resource - simple checks
+const isAuthenticated = permission('isAuthenticated', (ctx: AppContext) => 
+  !!ctx.user
+);
+
+const isAdmin = permission('isAdmin', (ctx: AppContext) => 
+  ctx.user.role === 'admin'
+);
+
+// With resource - entity-specific checks
+const isPostOwner = permission('isPostOwner', async (ctx: AppContext, post: Post) => {
+  return post.authorId === ctx.user.id;
+});
+```
+
+<Callout title="Async Support" type="info">
+  Permissions can be **sync or async**. Use async for database queries, API calls, or any I/O operations.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Compose Permissions
+
+Build complex rules from simple ones:
+
+```typescript
+import { or, and, not } from 'granter';
+
+// OR - any permission must allow
+const canEditPost = or(isPostOwner, isAdmin);
+
+// AND - all permissions must allow
+const canPublish = and(isAuthenticated, isPostOwner);
+
+// NOT - invert permission
+const isNotBanned = not(isBanned);
+```
+
+</Step>
+
+<Step>
+
+### Use Permissions
+
+Permissions are callable functions with helpful methods:
+
+```typescript
+const ctx: AppContext = { user: { id: '1', role: 'user' }, db };
+const post = await db.getPost('123');
+
+// Direct call - returns boolean
+if (await canEditPost(ctx, post)) {
+  await db.updatePost(post);
+}
+
+// Require permission (throws if denied)
+await canEditPost.orThrow(ctx, post);
+await canEditPost.orThrow(ctx, post, 'You cannot edit this post');
+
+// Filter array of resources
+const allPosts = await db.getPosts();
+const editablePosts = await canEditPost.filter(ctx, allPosts);
+
+// Debug why permission was denied
+const explanation = await canEditPost.explain(ctx, post);
+console.log(explanation);
+```
+
+</Step>
+
+<Step>
+
+### Simplify with `withContext()` (Optional)
+
+Bind context once to avoid passing it repeatedly:
+
+```typescript
+import { withContext } from 'granter';
+
+const abilities = withContext(ctx, {
+  canEditPost,
+  isAdmin,
+});
+
+// No need to pass ctx anymore!
+if (await abilities.canEditPost(post)) {
+  await db.updatePost(post);
+}
+```
+
+</Step>
+
+</Steps>
+
+## Full Example
+
+Here's a complete example with all the pieces together:
+
+```typescript
+import { permission, or, and, withContext } from 'granter';
+
+// 1. Types
+type AppContext = {
+  user: { id: string; role: string };
+  db: Database;
+};
+
+type Post = {
+  id: string;
+  authorId: string;
+  published: boolean;
+  locked: boolean;
+};
+
+// 2. Permissions
+const isAuthenticated = permission('isAuthenticated', (ctx: AppContext) => !!ctx.user);
+const isAdmin = permission('isAdmin', (ctx: AppContext) => ctx.user.role === 'admin');
+const isPostOwner = permission('isPostOwner', (ctx: AppContext, post: Post) => 
+  post.authorId === ctx.user.id
+);
+const isPostLocked = permission('isPostLocked', (ctx: AppContext, post: Post) => 
+  post.locked
+);
+
+// 3. Compose
+const canEditPost = and(
+  isAuthenticated,
+  not(isPostLocked),
+  or(isPostOwner, isAdmin)
+);
+
+// 4. Use in your app
+async function updatePost(ctx: AppContext, postId: string, updates: Partial<Post>) {
+  const post = await ctx.db.getPost(postId);
+  
+  // Check permission
+  await canEditPost.orThrow(ctx, post, 'You cannot edit this post');
+  
+  // Execute
+  return ctx.db.updatePost(postId, updates);
+}
+
+// 5. Optional: Use withContext for cleaner code
+async function updatePostWithAbilities(ctx: AppContext, postId: string, updates: Partial<Post>) {
+  const abilities = withContext(ctx, { canEditPost });
+  const post = await ctx.db.getPost(postId);
+  
+  await abilities.canEditPost.orThrow(post, 'You cannot edit this post');
+  return ctx.db.updatePost(postId, updates);
+}
+```
+
+## Next Steps
+
+Now that you understand the basics, dive deeper:
+
+- [Learn about Permissions](/docs/permissions) - Understand permission creation and patterns
+- [Explore Operators](/docs/operators) - Master `or`, `and`, `not` composition
+- [Discover Methods](/docs/methods) - Use `orThrow`, `filter`, `explain`
+- [Try with Express](/docs/express) - See a real-world REST API example
+
